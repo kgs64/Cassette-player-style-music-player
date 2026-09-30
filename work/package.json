@@ -1,0 +1,10 @@
+{
+	"dependencies": {
+		"@xhacker/kgmwasm": "1.0.0",
+		"@xhacker/qmcwasm": "1.0.0",
+		"crypto-js": "4.2.0",
+		"esbuild": "0.25.0",
+		"sql.js": "1.13.0",
+		"three": "0.170.0"
+	}
+}
