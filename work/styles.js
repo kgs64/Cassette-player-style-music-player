@@ -10,11 +10,12 @@ export const MACHINE_STYLES=[
  {id:'polar',model:'A—93',name:'POLAR STUDIO',detail:'PORCELAIN / MINIMAL / 1993',scale:[.965,1.045,.975],antenna:.90,handle:1.03,stripes:.7,colors:{silver:'#e2e1d6',edge:'#f1efe4',dark:'#677778',cream:'#f1e9d5',orange:'#709b93',metal:'#bac6c3'},roughness:.66,metalness:.12},
  {id:'timber',model:'T—76',name:'TIMBER HOUSE',detail:'FULL WOOD CABINET / 1976',scale:[1.055,.975,1.06],antenna:.80,handle:.93,wood:1,caseWood:1,colors:{silver:'#9b704a',edge:'#d3b88b',dark:'#382b24',cream:'#e9d3a9',orange:'#ad6a37',metal:'#b59a76'},roughness:.8,metalness:.08},
  {id:'orbit',model:'R—01',name:'ORBIT TOMORROW',detail:'RETRO FUTURE / CHROME + CYAN',scale:[1.075,.955,1.035],antenna:.67,handle:.89,future:1,stripes:.45,colors:{silver:'#c7d9d6',edge:'#e5e8d9',dark:'#293d48',cream:'#f0e8cf',orange:'#d67749',metal:'#abc8cc'},roughness:.26,metalness:.5},
+ {id:'pixel',model:'PX—83',name:'DOT MATRIX',detail:'PAPER / LOW RESOLUTION PRINT / 1983',scale:[1,.98,1.015],antenna:.88,handle:1,stripes:1,colors:{silver:'#d3d4bb',edge:'#ecebd7',dark:'#404b3b',cream:'#e6e0c4',orange:'#a3824f',metal:'#949d89'},roughness:.76,metalness:.13},
  {id:'mono',model:'B—02',name:'BLACK / WHITE',detail:'MONOCHROME / SATIN ENAMEL',scale:[1,.98,1.015],antenna:.88,handle:1,stripes:1,colors:{silver:'#eceeea',edge:'#fafaf5',dark:'#141719',cream:'#e7e9e5',orange:'#2b3032',metal:'#969e9e'},roughness:.48,metalness:.19}
 
 
 ];
-export const AD_COLLECTIONS=[{title:'THE ORIGINALS',year:'1982—1990',styles:['studio','field','night']},{title:'COLOUR STUDIES',year:'1984—1988',styles:['coral','lagoon','olive']},{title:'MATERIAL CULTURE',year:'1979—1993',styles:['walnut','metro','polar']},{title:'FORM & FANTASY',year:'SPECIAL EDITIONS',styles:['timber','orbit','mono']}];
+export const AD_COLLECTIONS=[{title:'THE ORIGINALS',year:'1982—1990',styles:['studio','field','night']},{title:'COLOUR STUDIES',year:'1984—1988',styles:['coral','lagoon','olive']},{title:'MATERIAL CULTURE',year:'1979—1993',styles:['walnut','metro','polar']},{title:'FORM & FANTASY',year:'SPECIAL EDITIONS',styles:['timber','orbit','mono']},{title:'PRINT & PIXELS',year:'1983—2001',styles:['studio','pixel','orbit']}];
 export function getMachineStyle(id){const style=MACHINE_STYLES.find(s=>s.id===id);if(!style)throw Error('Unknown machine style');return style;}
 export const FOCUS_AREAS={
  left:{target:[-4.65,4.5,1.3],offset:[-3.2,2.0,10.7],width:7.4},

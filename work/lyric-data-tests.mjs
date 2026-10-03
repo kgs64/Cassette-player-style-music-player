@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {parseLyrics,lyricIndex,matchLyricTrack,decodeLyricFrame} from './lyric-data.js';
+const parsed=parseLyrics('[ar:Local artist]\n[offset:-100]\n[00:01.20][00:03.40]纸上的歌\n[00:01.20]On paper\n[00:02.00]\n[00:80.00]bad');
+assert.equal(parsed.timed,true);assert.equal(parsed.cues[0].text,'纸上的歌\nOn paper');assert.equal(parsed.cues[1].text,'');assert.equal(parsed.cues.length,3);
+assert.equal(lyricIndex(parsed,.5),-1);assert.equal(lyricIndex(parsed,1.2),0);assert.equal(lyricIndex(parsed,3.4),2);assert.equal(lyricIndex(parsed,1.2),0);
+assert.deepEqual(parseLyrics('[ti:Title]\n'),{timed:false,cues:[]});assert.equal(parseLyrics('a\nb\nc').timed,false);assert.equal(lyricIndex(parseLyrics('a\nb'),200),0);
+const tracks=[{id:'1',fileName:'SONG.mp3',title:'歌'},{id:'2',fileName:'Other.flac',title:'Other'}];
+assert.equal(matchLyricTrack('song.lrc',tracks).id,'1');assert.equal(matchLyricTrack('unknown.lrc',tracks),null);assert.equal(matchLyricTrack('unknown.lrc',tracks,'2').id,'2');assert.equal(matchLyricTrack('song.lrc',[...tracks,{id:'3',fileName:'song.wav'}],'1'),null);
+const utf=new TextEncoder();const frame=new Uint8Array([3,101,110,103,0,...utf.encode('[00:00.00]A local line')]);assert.equal(decodeLyricFrame('USLT',frame).cues[0].text,'A local line');assert.equal(decodeLyricFrame('SYLT',new Uint8Array([3,101,110,103,1,1,0])),null);
+const sylt=new Uint8Array([3,101,110,103,2,1,0,...utf.encode('line'),0,0,0,3,232]);assert.equal(decodeLyricFrame('SYLT',sylt).cues[0].time,1);
+console.log('LYRIC_DATA_PASS');

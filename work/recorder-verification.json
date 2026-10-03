@@ -1,0 +1,22 @@
+{
+  "build": "5.2",
+  "tested": [
+    "NCM/KWM/KGM v3 generated fixtures: byte-for-byte",
+    "5 upstream QMC vectors: byte-for-byte",
+    "KGG v5 with plain/encrypted SQLite key DB",
+    "NCM to MP3 decoded playback and metadata",
+    "29 existing domain tests",
+    "archive and recorder channels, focus and tape dragging",
+    "background auto-advance and loop",
+    "invalid input preserves outlet, next success auto-archives old tape",
+    "MP3 download, persisted restore, no external requests",
+    "narrow touch viewport NCM recording"
+  ],
+  "limits": [
+    "No physical iPhone/Safari verification",
+    "Legacy KGM v2 integrated, no independent real-file fixture available",
+    "Unsupported encrypted variants and missing keys report failure; no MMKV import",
+    "Native audio decoding varies by browser",
+    "64 MiB input; existing 10-minute / 128 MiB PCM transcode limits retained"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "version": "5.14",
+  "date": "2026-10-04",
+  "reason": "Before online song terminal integration",
+  "sha256": {
+    "cassette-world.html": "7b6fd99cf48e8443b2514b8c697c8f5c947c6a00eab193133b9b75b7691ebadd",
+    "index.html": "7b6fd99cf48e8443b2514b8c697c8f5c947c6a00eab193133b9b75b7691ebadd",
+    "cassette-world-web-app.zip": "3b55317f10c8564cb8d07e0201d3aecc88d068bb776ba6b955ab258a2d4b9169"
+  }
+}

@@ -1,3 +1,5 @@
+import {createLyricLookup} from './lyric-fetch.js';
+import {planCabinetOrder,flatCabinetSlot} from './archive-order.js';
 import {createLensOptics} from './lens-optics.js';
 import {createLensMotion} from './lens-motion.js';
 import {createSettings} from './settings.js';
@@ -20,10 +22,13 @@ import {buildFigure,FIGURE_PLACEMENT,CLIMBER} from './figures.js';
 import {springStep,OPEN_ANGLE,KEY_REST,KEY_TRAVEL} from './physics.js';
 import {selectorIndex,insideTapeZone,rotatePaperOrder,PAPER_STEP,PAPER_THICKNESS,TABLE_TOP} from './interaction.js';
 import {createFoley} from './foley.js';
+import {createLyricWorld} from './lyric-world.js';
+import {parseLyrics,matchLyricTrack,MAX_LYRIC_BYTES,readLyricMetadata,lyricStem} from './lyric-data.js';
+import {createStudioRendering} from './studio-rendering.js';
+import {createStudioOcclusion} from './studio-occlusion.js';
 import {AUDIO_ACCEPT,AUDIO_EXTENSIONS,acceptsAudio,prepareAudio} from './audio-formats.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
@@ -48,14 +53,17 @@ const homePosition=new THREE.Vector3(11,12,26);if(innerWidth/innerHeight<.85)hom
 camera.position.copy(homePosition).multiplyScalar(1.08);
 const controls=new OrbitControls(camera,canvas);controls.target.set(0,3.2,0);controls.enableDamping=true;controls.dampingFactor=.065;controls.minDistance=8;controls.maxDistance=innerWidth/innerHeight<.85?80:48;controls.minPolarAngle=.28;controls.maxPolarAngle=Math.PI/2-.025;controls.enablePan=true;controls.screenSpacePanning=true;controls.enabled=!wallpaperMode;controls.enableZoom=!wallpaperMode;
 controls.mouseButtons={LEFT:THREE.MOUSE.ROTATE,MIDDLE:THREE.MOUSE.DOLLY,RIGHT:THREE.MOUSE.PAN};
-const pmrem=new THREE.PMREMGenerator(renderer);const room=new RoomEnvironment();scene.environment=pmrem.fromScene(room,.04).texture;scene.environmentIntensity=.45;room.dispose();pmrem.dispose();
-scene.add(new THREE.HemisphereLight(0xf4f4ec,0xaba699,.8));
+const hemisphere=new THREE.HemisphereLight(0xf4f4ec,0xaba699,.8);scene.add(hemisphere);
 const key=new THREE.DirectionalLight(0xfff6e5,2.3);key.position.set(-10,18,12);key.castShadow=true;key.shadow.mapSize.set(wallpaperMode||mobile?1024:2048,wallpaperMode||mobile?1024:2048);Object.assign(key.shadow.camera,{left:-16,right:16,top:16,bottom:-16,near:1,far:50});key.shadow.bias=-.00025;key.shadow.normalBias=.025;key.shadow.radius=5;scene.add(key);
 const rim=new THREE.DirectionalLight(0xe7f0fa,.85);rim.position.set(8,12,-9);scene.add(rim);
-let composer=null,bokeh=null;
-function createFocusComposer(){composer=new EffectComposer(renderer);composer.addPass(new RenderPass(scene,camera));bokeh=new BokehPass(scene,camera,{focus:25,aperture:.000018,maxblur:.003});bokeh.enabled=false;composer.addPass(bokeh);composer.addPass(new OutputPass());}
+const studioRendering=createStudioRendering({renderer,scene,key,rim,hemisphere,mobile,wallpaperMode});
+let composer=null,bokeh=null,renderQuality=0;
+function destroyComposer(){if(!composer)return;for(const pass of composer.passes)pass.dispose?.();composer.dispose();composer=null;bokeh=null;}
+function setRenderQuality(value){const next=value===1&&!mobile&&!wallpaperMode?1:0;if(next!==renderQuality){destroyComposer();renderQuality=next;}renderer.shadowMap.needsUpdate=true;}
+function createFocusComposer(){composer=new EffectComposer(renderer);for(const target of [composer.renderTarget1,composer.renderTarget2])target.samples=Math.min(4,renderer.capabilities.maxSamples);composer.addPass(new RenderPass(scene,camera));if(renderQuality)composer.addPass(createStudioOcclusion(scene,camera,innerWidth,innerHeight));bokeh=new BokehPass(scene,camera,{focus:25,aperture:.000018,maxblur:.003});bokeh.enabled=false;composer.addPass(bokeh);composer.addPass(new OutputPass());}
 const mat=(c,r=.6,m=0,more={})=>new THREE.MeshStandardMaterial({color:c,roughness:r,metalness:m,...more});
 const M={silver:mat('#b6bcb8',.42,.35),edge:mat('#d1d4cf',.38,.44),cream:mat('#e4e0d2',.64),dark:mat('#303735',.68),black:mat('#131b1c',.74),rubber:mat('#232929',.92),metal:mat('#8c9590',.32,.78),chrome:mat('#cad0c8',.22,.86),orange:mat('#bc582c',.55),red:mat('#853d30'),pcb:mat('#3e6555',.7),copper:mat('#bd9a60',.4,.67),paper:mat('#e6dfc9',.87),glass:mat('#929f98',.15,.08,{transparent:true,opacity:.15,depthWrite:false}),smoke:mat('#495d55',.24,.15,{transparent:true,opacity:.2,depthWrite:false}),tape:mat('#372b22',.62,.08),green:mat('#9eae75',.6,0,{emissive:'#4c582a',emissiveIntensity:.18})};
+studioRendering.finishMaterials(M);
 const model=new THREE.Group();scene.add(model);const props=new THREE.Group();scene.add(props);
 const parts=[],hits=[],gears=[],reels=[],cones=[],people=[],lamps=[],buttons={},knobs={},eqSliders=[];
 let uid=0;
@@ -86,9 +94,12 @@ function interactive(object,kind,value){object.userData.action={kind,value};retu
 function halo(parent,w,h,x,y,z){return box(parent,w,h,.008,x,y,z,M.dark,.025);}
 
 // The photography plinth is the entire world. No screen-space interface.
-const ground=box(scene,200,.1,200,0,-.4,0,mat('#eeede7',.95),0);
-const base=box(scene,22.2,.5,18.4,1.9,-.08,.1,mat('#e1e0d7',.87),.15);
-function contact(x,z,sx,sz,opacity=.2){const c=document.createElement('canvas');c.width=c.height=128;const k=c.getContext('2d'),gr=k.createRadialGradient(64,64,2,64,64,64);gr.addColorStop(0,`rgba(42,39,31,${opacity})`);gr.addColorStop(1,'rgba(42,39,31,0)');k.fillStyle=gr;k.fillRect(0,0,128,128);const p=new THREE.Mesh(new THREE.PlaneGeometry(sx,sz),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(c),transparent:true,depthWrite:false}));p.rotation.x=-Math.PI/2;p.position.set(x,.18,z);scene.add(p);}
+const ground=box(scene,200,.1,200,0,-.4,0,mat('#e9e6dc',.95),0);
+const base=box(scene,22.2,.5,18.4,1.9,-.08,.1,mat('#e4e1d6',.87),.15);
+const contactCanvas=document.createElement('canvas');contactCanvas.width=contactCanvas.height=128;
+const contactContext=contactCanvas.getContext('2d'),contactGradient=contactContext.createRadialGradient(64,64,2,64,64,64);contactGradient.addColorStop(0,'rgba(42,39,31,1)');contactGradient.addColorStop(1,'rgba(42,39,31,0)');contactContext.fillStyle=contactGradient;contactContext.fillRect(0,0,128,128);
+const contactTexture=new THREE.CanvasTexture(contactCanvas);contactTexture.colorSpace=THREE.SRGBColorSpace;
+function contact(x,z,sx,sz,opacity=.2){const p=new THREE.Mesh(new THREE.PlaneGeometry(sx,sz),new THREE.MeshBasicMaterial({map:contactTexture,transparent:true,depthWrite:false,opacity,toneMapped:false}));p.rotation.x=-Math.PI/2;p.position.set(x,.18,z);p.renderOrder=1;scene.add(p);return p;}
 contact(0,.1,18,8,.3);
 const basePlaque=box(props,4.55,.03,.76,-4.8,.195,-3.7,M.paper,.025);const baseTitle=label(props,'CASSETTE WORLD   /   C—82',4.15,.2,-4.8,.217,-3.84,{weight:700});baseTitle.rotation.x=-Math.PI/2;
 const baseFine=label(props,'A MINIATURE ANALOG MUSIC MACHINE',4.1,.1,-4.8,.219,-3.55,{mono:true});baseFine.rotation.x=-Math.PI/2;
@@ -244,6 +255,7 @@ box(shell,4.5,.027,.018,0,2.84,.252,M.future,.006);for(const x of [-6.86,6.86])b
 
 // One physical drawer; legacy archive slots remain addressable across 72 pages.
 const cabinet=createCabinet({props,group,box,label,rod,screw,interactive,M,cassette,disposeGroup});
+contact(cabinet.root.position.x,cabinet.root.position.z,5.4,3.5,.25);
 const magnifyingGlass=group(props,10.8,TABLE_TOP+.095,5.15);magnifyingGlass.rotation.y=-.55;
 ring(magnifyingGlass,.57,.055,0,0,0,M.chrome).rotation.x=-Math.PI/2;
 ring(magnifyingGlass,.50,.021,0,.012,0,M.copper).rotation.x=-Math.PI/2;
@@ -288,6 +300,12 @@ person(props,-.9,TABLE_TOP,3.38,'#788772','carry',-1.4);person(props,.7,TABLE_TO
 const archiveHelper=person(cabinet.root,-3.6,0,1.9,'#98794f','work',1.1);archiveHelper.scale.setScalar(1/.75);people.at(-1).archiveWorker=true;
 const archiveClerk=person(cabinet.root,2.7,1.98,-.7,'#75897b','work',0);archiveClerk.scale.setScalar(1/.75);people.at(-1).archiveWorker=true;
 box(archiveClerk,.33,.045,.25,0,.42,.22,M.paper,.008);
+// Shared, static contact patches anchor figures without another scene render.
+scene.updateMatrixWorld(true);
+const floorFigures=people.filter(p=>p.g.getWorldPosition(new THREE.Vector3()).y<=TABLE_TOP+.01);
+const footShadows=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({map:contactTexture,transparent:true,depthWrite:false,opacity:.24,toneMapped:false}),floorFigures.length);
+const shadowPose=new THREE.Object3D();shadowPose.rotation.x=-Math.PI/2;shadowPose.scale.set(.72,.46,1);
+floorFigures.forEach((p,i)=>{shadowPose.position.copy(p.g.getWorldPosition(new THREE.Vector3()));shadowPose.position.y=TABLE_TOP+.014;shadowPose.updateMatrix();footShadows.setMatrixAt(i,shadowPose.matrix);});scene.add(footShadows);
 function reactPeople(activity,point=null){const now=performance.now();people.forEach((p,i)=>{if(p.archiveWorker&&(activity==='archive'||activity==='tape')){p.activity='point';p.until=now+3200;p.look=point||cabinet.root.localToWorld(new THREE.Vector3(0,3,3));return;}if(p.pose==='climb'){p.activity='listen';p.until=now+1800;p.look=point;return;}if(activity==='tape'&&(p.pose==='work'||p.pose==='carry'||i<2)){p.activity='point';p.until=now+2800;p.look=new THREE.Vector3(0,3.5,2.5);}else if(activity==='service'){p.activity='balance';p.until=now+4300;p.look=new THREE.Vector3(0,5,0);}else if(activity==='play'&&p.respond){p.activity='listen';p.until=now+2200;}else if(activity==='knob'&&i<2){p.activity='listen';p.until=now+1300;p.look=point;}});}
 function greetPerson(index){const p=people[index];if(!p)return;p.activity=p.pose==='climb'?'listen':'wave';p.until=performance.now()+2400;p.look=camera.position.clone();}
 const carried=cassette(props,'FIELD RECORDINGS','#ad8658',.38);carried.position.set(-.1,.62,3.48);
@@ -328,7 +346,7 @@ function makeStylePrint(style){
 function paperPose(rank){return {x:rank*.10,y:rank*.010,z:(AD_COLLECTIONS.length-1-rank)*PAPER_STEP,angle:-rank*.018};}
 function setPaperPose(page,rank){const p=paperPose(rank);page.group.position.set(p.x,p.y,p.z);page.group.rotation.z=p.angle;}
 for(const [pageIndex,collection]of AD_COLLECTIONS.entries()){
- const page=group(advertisement);interactive(page,'adFocus');box(page,6.65,2.64,PAPER_THICKNESS,0,0,0,mat(['#e6dfc9','#e9daca','#d8dfd9','#e0ddd2'][pageIndex],.89),.009);
+ const page=group(advertisement);interactive(page,'adFocus');box(page,6.65,2.64,PAPER_THICKNESS,0,0,0,mat(['#e6dfc9','#e9daca','#d8dfd9','#e0ddd2'][pageIndex%4],.89),.009);
  const focusLabel=label(page,'CASSETTE WORLD',2.68,.22,-1.66,1.02,.018,{weight:800});label(page,collection.title+'  /  '+collection.year,2.9,.105,1.58,1.01,.018,{mono:true});box(page,6.10,.012,.006,0,.82,.017,M.dark,0);
  for(const [i,id]of collection.styles.entries()){
   const style=getMachineStyle(id),x=(i-1)*2.12;const picture=new THREE.Mesh(new THREE.PlaneGeometry(1.99,1.00),new THREE.MeshBasicMaterial({map:makeStylePrint(style),toneMapped:false}));picture.position.set(x,.18,.020);page.add(picture);interactive(picture,'style',style.id);
@@ -367,18 +385,22 @@ async function changeStyle(id){
  await animateMotion(2200,t=>{const u=ease(t);model.scale.lerpVectors(fromScale,toScale,u);styleGroundOffset=.195*(1-model.scale.y);updateLadder();antenna.scale.y=THREE.MathUtils.lerp(fromAntenna,style.antenna,u);handle.scale.y=THREE.MathUtils.lerp(fromHandle,style.handle,u);M.caseWood.opacity=THREE.MathUtils.lerp(fromCaseWood,style.caseWood||0,u);M.future.opacity=THREE.MathUtils.lerp(fromFuture,style.future||0,u);M.veneer.opacity=THREE.MathUtils.lerp(fromWood,style.wood||0,u);M.grilleStripe.opacity=THREE.MathUtils.lerp(fromStripes,style.stripes||0,u);M.grilleStripe.color.copy(M.edge.color);for(const [key,color]of Object.entries(style.colors))M[key].color.copy(colors[key]).lerp(new THREE.Color(color),u);M.silver.roughness=THREE.MathUtils.lerp(roughness,style.roughness,u);M.silver.metalness=THREE.MathUtils.lerp(metalness,style.metalness,u);
    if(performance.now()-cableTick>80){inkColor.copy(fromInk).lerp(toInk,u);for(const label of adaptiveInk)label.userData.setInk('#'+inkColor.getHexString());cableTick=performance.now();}
  });
- inkColor.copy(toInk);for(const label of adaptiveInk)label.userData.setInk('#'+inkColor.getHexString());currentStyle=id;modelBadge.userData.setText(style.model);rearName.userData.setText(`CASSETTE SYSTEM ${style.model}\nDC 9V  ·  6 × R20 / D\nSERIAL 008417\nMADE FOR CASSETTE WORLD`);syncAdSelection();
+ inkColor.copy(toInk);for(const label of adaptiveInk)label.userData.setInk('#'+inkColor.getHexString());currentStyle=id;lyricWorld.setTheme(id);modelBadge.userData.setText(style.model);rearName.userData.setText(`CASSETTE SYSTEM ${style.model}\nDC 9V  ·  6 × R20 / D\nSERIAL 008417\nMADE FOR CASSETTE WORLD`);syncAdSelection();
  styleAnimating=false;busy=false;sceneState='OVERVIEW';focused=false;focusArea='overview';mechanicalSound('service-close');renderer.shadowMap.needsUpdate=true;
 }
 
+const lyricWorld=createLyricWorld({props,group,box,rod,ring,interactive,TABLE_TOP,mobile,onDirty:()=>{renderer.shadowMap.needsUpdate=true;}});
+
 // Merge static geometry per material and parent; keep each mechanical degree of freedom intact.
+lyricWorld.root.traverse(o=>{if(o.isMesh)o.userData.dynamic=true;});
 const dynamicMeshes=new Set([...ladderRails,...ladderCaps,...ladderFeet,...ladderRungs,...recorder.reels,stereoSwitch.tab,randomSwitch.tab,repeatSwitch.tab,beltMarker,...people.map(p=>p.head),...tapeModel.userData.spool.map(s=>s.wound)]);
 function consolidate(root){for(const child of [...root.children])if(child.isGroup)consolidate(child);const buckets=new Map();for(const m of root.children){if(!m.isMesh||m.isInstancedMesh||m.userData.action||m.userData.dynamic||dynamicMeshes.has(m)||m.material.map||m.material.transparent||Array.isArray(m.material)||!m.visible)continue;const key=m.material.uuid;if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push(m);}for(const list of buckets.values()){if(list.length<2)continue;const geometries=list.map(m=>{m.updateMatrix();return (m.geometry.index?m.geometry.toNonIndexed():m.geometry.clone()).applyMatrix4(m.matrix);});const geo=mergeGeometries(geometries,false);geometries.forEach(g=>g.dispose());if(!geo)continue;const merged=new THREE.Mesh(geo,list[0].material);merged.castShadow=true;merged.receiveShadow=true;root.add(merged);list.forEach(m=>{root.remove(m);m.geometry.dispose();});}}
 const propMaterialCopies=new Map();props.traverse(o=>{if(!o.isMesh)return;let ancestor=o;while(ancestor){if(ancestor===cabinet.root)return;ancestor=ancestor.parent;}const clone=m=>{if(!Object.values(M).includes(m))return m;if(!propMaterialCopies.has(m))propMaterialCopies.set(m,m.clone());return propMaterialCopies.get(m);};o.material=Array.isArray(o.material)?o.material.map(clone):clone(o.material);});
 consolidate(model);consolidate(props);
 const lensMotion=createLensMotion(magnifyingGlass,scene,camera,lensSign,()=>{renderer.shadowMap.needsUpdate=true;});
 const lensOptics=createLensOptics(magnifyingGlass,scene,camera,renderer);
-let effectsEnabled=true;
+let effectsEnabled=true,onlineLyrics=false;
+const lyricLookup=createLyricLookup({client:'Cassette World/5.14 ('+(location.origin==='null'?'file://cassette-world.html':location.origin)+')'});
 
 
 if(mobile){
@@ -464,7 +486,7 @@ async function importAudioBatch(files,channel='archive'){
  const toRecorder=channel==='recorder';
  // iOS may pass files with an unknown UTI; the extension validator below is
  // authoritative, and the recorder should report rejected batches locally.
- await archiveBoot;const accepted=files.filter(f=>!keyFile(f)&&acceptsAudio(f));if(!accepted.length){status('AUDIO FILES ONLY',3500);if(toRecorder)recorder.fail('AUDIO FILES ONLY');return;}
+ await archiveBoot;const accepted=files.filter(f=>!keyFile(f)&&acceptsAudio(f));const lyricFiles=files.filter(f=>/\.lrc$/i.test(f.name));if(!accepted.length&&lyricFiles.length){await importLyrics(lyricFiles);return;}if(!accepted.length){status('AUDIO FILES ONLY',3500);if(toRecorder)recorder.fail('AUDIO FILES ONLY');return;}
  if(navigator.storage?.persist)navigator.storage.persist().catch(()=>{});
  let completed=0,rejected=0,position=0;
  let importKeys;try{if(toRecorder)recorder.progress(0,'READING');importKeys=await loadImportKeys(files);}catch(error){errorText=error.message;if(toRecorder)recorder.fail(errorText);status(errorText,7000);return;}
@@ -481,12 +503,17 @@ async function importAudioBatch(files,channel='archive'){
   const identity=fingerprint(file,duration);if(playerState.playlist.some(t=>t.fingerprint===identity)){if(toRecorder)recorder.fail('ALREADY IN ARCHIVE');status('ALREADY IN ARCHIVE',3500);continue;}
   const ext=file.name.split('.').pop().toLowerCase();
   let blob=prepared.blob,format=prepared.converted?'WAV':(unlocked.ext||ext).toUpperCase(),converted=!!prepared.converted;
-  if((toRecorder&&format!=='MP3')||!nativePlayable(blob,unlocked.ext||ext)){const encoded=await transcodeMp3(blob,{duration,onProgress:report});blob=encoded.blob;format='MP3';converted=true;duration=encoded.duration;}
-  url=URL.createObjectURL(blob);
   t={id:crypto.randomUUID?.()||String(Date.now()+Math.random()),title:file.name.replace(/\.[^.]+$/,''),artist:'UNKNOWN ARTIST',album:'LOCAL TAPES',duration,format,sourceFormat:ext.toUpperCase(),fileSize:file.size,size:blob.size,mimeType:blob.type||'',audioBlob:blob,originalBlob:null,artworkBlob:null,cover:null,objectURL:url,fingerprint:identity,fileName:file.name,lastModified:file.lastModified,createdAt:Date.now(),updatedAt:Date.now(),converted,recorded:toRecorder,onRecorder:toRecorder,labelStyle:TAPE_COLORS[playerState.playlist.length%5]};
-  await readMetadata(sourceFile,t);await readExtendedMetadata(sourceFile,t);
+  await readMetadata(sourceFile,t);await readExtendedMetadata(sourceFile,t);t.lyrics=t.lyrics||await readLyricMetadata(sourceFile);t.lyricsRead=true;
   for(const field of ['title','artist','album'])if(typeof unlocked.meta?.[field]==='string'&&unlocked.meta[field])t[field]=unlocked.meta[field];
   if(unlocked.meta?.artworkBlob){if(t.cover)URL.revokeObjectURL(t.cover);t.artworkBlob=unlocked.meta.artworkBlob;t.cover=URL.createObjectURL(t.artworkBlob);}
+  const companion=lyricFiles.find(f=>lyricStem(f.name)===lyricStem(file.name));
+  if(companion&&companion.size<=MAX_LYRIC_BYTES){const data=parseLyrics(await companion.text());if(data.cues.length){t.lyrics=data;t.lyricsOrigin='lrc';}}
+  if(t.lyrics?.cues.length){t.lyricStatus='local';t.lyricsOrigin ||= 'embedded';}
+  const pendingLyrics=toRecorder&&onlineLyrics&&!t.lyrics?.cues.length?lyricLookup.lookup(t):Promise.resolve(null);
+  if((toRecorder&&format!=='MP3')||!nativePlayable(blob,unlocked.ext||ext)){const encoded=await transcodeMp3(blob,{duration,onProgress:report});blob=encoded.blob;format='MP3';converted=true;duration=encoded.duration;}
+  const found=await pendingLyrics;if(found){t.lyricStatus=found.status;if(found.lyrics){t.lyrics=found.lyrics;t.lyricsOrigin='online';t.lyricsProvider=found.provider;t.lyricsRecordId=found.recordId;}}
+  url=URL.createObjectURL(blob);Object.assign(t,{audioBlob:blob,objectURL:url,size:blob.size,mimeType:blob.type,duration,format,converted});
   if(toRecorder){blob=await tagMp3(blob,t);URL.revokeObjectURL(url);url=URL.createObjectURL(blob);Object.assign(t,{audioBlob:blob,size:blob.size,mimeType:blob.type,objectURL:url});}
   const related=playerState.playlist.find(r=>albumKey(r)===albumKey(t));if(related?.labelStyle)t.labelStyle=related.labelStyle;
   while(busy||archiveOperation)await new Promise(resolve=>setTimeout(resolve,100));archiveOperation=true;
@@ -500,11 +527,24 @@ async function importAudioBatch(files,channel='archive'){
   errorText='';completed++;reactPeople('archive');
  }catch(error){if(!committed){if(url)URL.revokeObjectURL(url);if(t?.cover)URL.revokeObjectURL(t.cover);}rejected++;const failedExt=(file.name.split('.').pop()||'').toUpperCase();errorText=error.name==='QuotaExceededError'?'ARCHIVE FULL':error.message==='UNSUPPORTED AUDIO CODEC'?`${failedExt} NOT PLAYABLE HERE`:String(error.message||'CONVERSION FAILED');if(toRecorder)recorder.fail(errorText);status(errorText,5000);
  }finally{archiveOperation=false;queueArchiveSave();}}
+ if(lyricFiles.length)await importLyrics(lyricFiles,false);
  checkStorage();if(completed){const done=toRecorder?completed+' MP3 READY':completed+' TAPES FILED'+(loaded?'':'  ·  DRAG ONE TO THE DOOR');status(done+(toRecorder?' / '+localAlbums.message:'')+(rejected?' / '+rejected+' SKIPPED':''),5500);}
 }
 // iOS maps accept strings to UTIs and disables encrypted/local formats that
 // have no registered UTI. acceptsAudio() still validates every selected file.
-const fileInput=document.querySelector('#files');fileInput.accept=device.isIOS?'':AUDIO_ACCEPT;fileInput.addEventListener('change',()=>{unlockAudio();addFiles(fileInput.files,importChannel);fileInput.value='';});
+const fileInput=document.querySelector('#files');fileInput.accept=device.isIOS?'':AUDIO_ACCEPT+',.lrc';fileInput.addEventListener('change',()=>{unlockAudio();addFiles(fileInput.files,importChannel);fileInput.value='';});
+const lyricInput=document.createElement('input');lyricInput.type='file';lyricInput.accept=device.isIOS?'':'.lrc,text/plain';lyricInput.multiple=true;lyricInput.id='lyric-files';document.body.append(lyricInput);
+lyricInput.addEventListener('change',()=>{const batch=[...lyricInput.files];importQueue=importQueue.then(()=>importLyrics(batch)).catch(()=>status('LYRIC IMPORT ERROR'));lyricInput.value='';});
+async function importLyrics(files,allowCurrent=true){
+ let attached=0;for(const file of files){if(!/\.lrc$/i.test(file.name)||file.size>MAX_LYRIC_BYTES){status('USE LRC UNDER 512 KB',4500);continue;}
+ const fallback=allowCurrent&&files.length===1?(cabinet.state.selectedTape||currentTapeId()):null;
+ const track=matchLyricTrack(file.name,playerState.playlist,fallback);if(!track){status('LRC: MATCH THE AUDIO FILE NAME',5500);continue;}
+ const data=parseLyrics(await file.text());if(!data.cues.length){status('NO LYRICS IN THIS FILE',4500);continue;}
+ const record={...track,lyrics:data,lyricsOrigin:'lrc',lyricStatus:'local',lyricsRead:true,updatedAt:Date.now()};if(archive.db)await archive.putTrack(record);Object.assign(track,record);attached++;
+ }if(attached){lastInteraction=performance.now();status(attached+' LYRIC SHEETS FILED',4000);queueArchiveSave();}
+}
+const checkedLyrics=new Set();
+function loadStoredLyrics(track){if(!track||track.lyricsRead||track.lyrics||checkedLyrics.has(track.id)||!track.audioBlob)return;checkedLyrics.add(track.id);readLyricMetadata(track.audioBlob).then(async data=>{if(!playerState.playlist.includes(track))return;track.lyricsRead=true;if(data)track.lyrics=data;if(archive.db)await archive.putTrack(track);lastInteraction=performance.now();}).catch(()=>{});}
 const TAPE_COLORS=['#c9b779','#a0b4a8','#c59172','#a8a6b8','#d1c7b2'];
 function localArchivePosition(index){model.updateMatrixWorld(true);return model.worldToLocal(cabinet.position(index));}
 async function moveSegment(object,to,duration,scale=null,rotation=null,yaw=0){const from=object.position.clone(),fromScale=object.scale.x,fromRotation=object.rotation.x,fromYaw=object.rotation.y;duration=Math.max(duration,from.distanceTo(to)*85);await animateMotion(duration,t=>{const u=t*t*t*(t*(t*6-15)+10);object.position.lerpVectors(from,to,u);object.rotation.y=THREE.MathUtils.lerp(fromYaw,yaw,u);if(scale!==null)object.scale.setScalar(THREE.MathUtils.lerp(fromScale,scale,u));if(rotation!==null)object.rotation.x=THREE.MathUtils.lerp(fromRotation,rotation,u);});}
@@ -616,7 +656,7 @@ function focusObject(object){
  for(let o=object;o&&o!==scene;o=o.parent){targetObject=o;if(o===recorder.root){focusRecorder();return;}if(o===cabinet.root){focusCabinet();return;}if(adPages.some(p=>p.group===o)||o.userData.part||o.parent===props)break;}
  const bounds=new THREE.Box3().setFromObject(targetObject);if(bounds.isEmpty())return;const at=bounds.getCenter(new THREE.Vector3()),size=bounds.getSize(new THREE.Vector3());const isPaper=adPages.some(p=>p.group===targetObject);
  const offset=isPaper?new THREE.Vector3(0,10,5):camera.position.clone().sub(controls.target).normalize().multiplyScalar(8);
- focused=true;focusArea=isPaper?'advertisement':'object';sceneState='OBJECT_FOCUS';moveCamera(fitRegionPosition(at,offset,Math.max(3,size.length()*1.15)),at,650);
+ focused=true;focusArea=isPaper?'advertisement':targetObject===lyricWorld.root?'lyrics':'object';sceneState='OBJECT_FOCUS';moveCamera(fitRegionPosition(at,offset,Math.max(3,size.length()*1.15)),at,650);
 }
 function overview(){if(busy)return;if(exploded){toggleExplode();return;}focused=false;focusArea='overview';sceneState='OVERVIEW';moveCamera(homePosition.clone(),new THREE.Vector3(2,3.2,0));}
 function focusRegion(which){
@@ -650,7 +690,7 @@ function visibleTree(o){while(o){if(!o.visible)return false;o=o.parent;}return t
 function actionOf(o){while(o){if(o.userData.action)return {object:o,...o.userData.action};o=o.parent;}return null;}
 function partOf(o){while(o){if(o.userData.part)return o;o=o.parent;}return null;}
 function pick(event,all=false){pointer.set(event.clientX/innerWidth*2-1,-event.clientY/innerHeight*2+1);raycaster.setFromCamera(pointer,camera);
- const intersections=raycaster.intersectObjects(all?[model]:[model,props],true).filter(h=>visibleTree(h.object));if(!intersections.length)return null;
+ const intersections=raycaster.intersectObjects(all?[model]:[model,props],true).filter(h=>visibleTree(h.object)&&(!(actionOf(h.object)?.kind==='ambientLyric')||lyricWorld.isTouchable(actionOf(h.object).value,h.uv)));if(!intersections.length)return null;
  const first=intersections[0];if(all)return first;
  // Opaque housing blocks controls on the other side. Printed decals allow a
  // nearby control surface to be selected without clicking through the cabinet.
@@ -659,12 +699,19 @@ function pick(event,all=false){pointer.set(event.clientX/innerWidth*2-1,-event.c
  return intersections.find(h=>h.distance-first.distance<.075&&samePage(h.object)&&actionOf(h.object))||first;
 }
 function act(action,event){if(!action||busy)return;lastInteraction=performance.now();const {kind,value}=action;
+if(kind==='lyrics'){lyricNoteTap(event);return;}if(kind==='ambientLyric')return;
 if(kind==='settings'){settings.open();return;}if(kind==='magnifier'){focusCabinet();inspector.active?inspector.close():inspector.open();return;}if(inspector.active&&['track','recorderTape','seek'].includes(kind)){const t=kind==='track'?playerState.playlist[value]:kind==='recorderTape'?playerState.playlist.find(t=>t.id===recorder.state.trackId):playerState.playlist[playerState.currentTrack];if(t)inspector.inspect(t,kind==='seek');if(kind==='track')selectArchiveTape(value);return;}if(kind==='recorderFolder'){chooseAlbumFolder();return;}if(archiveAction(kind,value,event))return;
 if(kind==='adFocus'){focusObject(action.object);return;}if(kind==='adNext'){cycleAdvertisement();return;}if(kind==='style'){changeStyle(value);return;}if(kind==='focus'){focusRegion(value||zoneAt(event));return;}if(kind==='explode'){status('DOUBLE TAP + / HOLD TO SERVICE');return;}if(kind==='person'){greetPerson(value);return;}if(kind==='import'){focusCabinet();requestImport('archive');return;}
 if(kind==='recorderFocus'){focusRecorder();return;}
 if(kind==='button'){if(!focused)focusMachine();if(value==='play')play();else if(value==='pause')playerState.playing?pause():play();else if(value==='stop')stop();else if(value==='next')next(1);else if(value==='prev')next(-1);else if(value==='record'){pulse('record');focusRecorder();requestImport('recorder');}return;}
 if(kind==='door'){if(focusArea!=='center'&&focusArea!=='tape'){focusRegion('center');return;}if(!loaded){if(doorTarget)fileInput.click();else openDoor(true);}else if(doorTarget){openDoor(false);}return;}
 if(kind==='seek'){if(doorTarget>.9)unloadTape();return;}if(kind==='knob'){if(value==='volume')status(`VOLUME ${Math.round(playerState.volume*100)}${playerState.muted?'  /  MUTED':''}`);return;}if(kind==='track'){selectArchiveTape(value);return;}if(kind==='selectorState'){applySelector(value.kind,value.index);return;}if(kind==='selector'){applySelector(value,(selectorValue(value)+1)%topSelectors[value].states.length);return;}if(kind==='speaker'){const area=value.position.x<0?'left':'right';if(event?.shiftKey)localSpeaker(value);else focusRegion(area);return;}if(kind==='region'){focusRegion(value);return;}}
+let lastLyricTap=null,lastLyricToggle=0;
+function lyricNoteTap(event,short=true){
+ if(busy)return;const now=performance.now(),double=short&&lastLyricTap&&now-lastLyricTap.time<360&&Math.hypot(event.clientX-lastLyricTap.x,event.clientY-lastLyricTap.y)<18&&event.pointerType===lastLyricTap.type;
+ if(double){lastLyricTap=null;lastLyricToggle=now;lyricWorld.toggle();mechanicalSound('paper');queueArchiveSave();return;}
+ lastLyricTap=short?{time:now,x:event.clientX,y:event.clientY,type:event.pointerType}:null;if(inspector.active)inspector.lower();focusObject(lyricWorld.root);
+}
 let down=null,longPress=null,clickTimer=null,lastServiceTap=null,focusArm=null;const activePointers=new Set();
 function freezeCamera(){const position=camera.position.clone(),target=controls.target.clone(),damping=controls.enableDamping;controls.enableDamping=false;controls.update();controls.enableDamping=damping;camera.position.copy(position);controls.target.copy(target);controls.enabled=false;}
 function knobScreen(type){const p=knobs[type].part.getWorldPosition(new THREE.Vector3()).project(camera);return {x:(p.x+1)*innerWidth/2,y:(1-p.y)*innerHeight/2};}
@@ -677,7 +724,9 @@ canvas.addEventListener('pointerdown',e=>{
  if(!bootReady)return;finishIntro();unlockAudio();lastInteraction=performance.now();cameraMotion=null;activePointers.add(e.pointerId);
  if(activePointers.size>1){if(tapeDrag)finishTapeDrag(false);clearTimeout(longPress);focusArm=null;lastServiceTap=null;down=null;drag=null;endScan();controls.enabled=true;return;}
  const hit=pick(e);let a=hit?actionOf(hit.object):null;if(!a&&hit&&partOf(hit.object))a={kind:'focus',value:zoneAt(e),object:partOf(hit.object)};
+ if(lastLyricTap&&performance.now()-lastLyricTap.time<360&&Math.hypot(e.clientX-lastLyricTap.x,e.clientY-lastLyricTap.y)<18&&e.pointerType===lastLyricTap.type)a={kind:'lyrics',object:lyricWorld.root};
  if(inspector.active&&(a?.kind==='track'||a?.kind==='recorderTape'))inspector.lower();
+ lyricWorld.setHovered(a?.kind==='ambientLyric'?a.value:-1);
  down={x:e.clientX,y:e.clientY,time:performance.now(),a,hit:hit?.object,id:e.pointerId,moved:false};
  if(a&&a.kind!=='focus'&&!busy){freezeCamera();canvas.setPointerCapture(e.pointerId);}
  if(a&&!busy&&(['knob','eq','seek','track','recorderTape','selector','selectorState','drawer'].includes(a.kind)||(a.kind==='door'&&loaded&&!doorTarget)||(a.kind==='button'&&['ff','rew'].includes(a.value)))){
@@ -685,7 +734,7 @@ canvas.addEventListener('pointerdown',e=>{
   else{const center=a.kind==='knob'?knobScreen(a.value):null;drag={...a,startX:e.clientX,startY:e.clientY,lastX:e.clientX,lastY:e.clientY,startValue:a.kind==='knob'?knobs[a.value].value:a.kind==='eq'?playerState.eq[a.value]:playerState.currentTime,rawValue:a.kind==='knob'?knobs[a.value].value:0,center,lastAngle:center?Math.atan2(e.clientX-center.x,center.y-e.clientY):0,axis:e.altKey?'angular':null,activated:false};}
  }
  if(a?.kind==='explode'&&!busy)longPress=setTimeout(()=>{if(down&&!down.moved&&activePointers.size===1){lastServiceTap=null;down=null;drag=null;controls.enabled=true;toggleExplode();}},950);
- else if(!busy&&focusArm&&performance.now()-focusArm.time<1400&&(Math.hypot(e.clientX-focusArm.x,e.clientY-focusArm.y)<22||partOf(hit?.object)&&partOf(hit.object)===partOf(focusArm.object))){
+ else if(a?.kind!=='lyrics'&&a?.kind!=='ambientLyric'&&!busy&&focusArm&&performance.now()-focusArm.time<1400&&(Math.hypot(e.clientX-focusArm.x,e.clientY-focusArm.y)<22||partOf(hit?.object)&&partOf(hit.object)===partOf(focusArm.object))){
   const object=focusArm.object;focusArm=null;freezeCamera();status('HOLD TO FOCUS',1000);
   longPress=setTimeout(()=>{if(down&&!down.moved&&activePointers.size===1){endScan();down=null;drag=null;controls.enabled=true;focusObject(object);mechanicalSound('detent');}},650);
  }
@@ -713,12 +762,13 @@ canvas.addEventListener('pointermove',e=>{
   drag.lastX=e.clientX;drag.lastY=e.clientY;return;
  }
  const hit=pick(e,exploded);hover=hit?(exploded?partOf(hit.object):actionOf(hit.object)):null;
- canvas.style.cursor=hover?.kind==='knob'?'ns-resize':hover?'pointer':'grab';hoverRing.visible=!!hover&&!exploded;
+ lyricWorld.setHovered(!down&&e.pointerType!=='touch'&&hover?.kind==='ambientLyric'?hover.value:down?.a?.kind==='ambientLyric'&&!down.moved?down.a.value:-1);
+ canvas.style.cursor=hover?.kind==='knob'?'ns-resize':hover?'pointer':'grab';hoverRing.visible=!!hover&&!exploded&&!['ambientLyric','lyrics'].includes(hover?.kind);
  if(hoverRing.visible){hoverRing.position.copy(hit.point);hoverRing.quaternion.copy(camera.quaternion);}
  infoGroup.visible=!!hover&&exploded;if(infoGroup.visible){infoGroup.position.copy(hit.point);infoGroup.quaternion.copy(camera.quaternion);infoLabel.userData.setText(`PART ${String(hover.userData.part.id).padStart(3,'0')}\n${hover.userData.part.name.split(' · ')[1]}`);}
 });
 function release(e){
- clearTimeout(longPress);activePointers.delete(e.pointerId);if(down&&down.id!==e.pointerId)return;
+ lyricWorld.setHovered(-1);clearTimeout(longPress);activePointers.delete(e.pointerId);if(down&&down.id!==e.pointerId)return;
  const released=down,wasScan=!!scan;endScan();controls.enabled=true;drag=null;down=null;try{canvas.releasePointerCapture(e.pointerId);}catch{}
  if(tapeDrag&&!tapeDrag.finishing){updateTapeDrag(e);finishTapeDrag(tapeDrag.ready&&activePointers.size===0);return;}
  if(!released||released.moved||wasScan||activePointers.size)return;
@@ -728,19 +778,21 @@ function release(e){
   if(deliberate){lastServiceTap=null;toggleExplode();}else{lastServiceTap={time:now,x:e.clientX,y:e.clientY};status('DOUBLE TAP + / HOLD TO SERVICE');}return;
  }
  lastServiceTap=null;
- if(released.hit&&now-released.time<350)focusArm={time:now,x:e.clientX,y:e.clientY,object:released.hit};
+ if(released.hit&&!['ambientLyric','lyrics'].includes(a?.kind)&&now-released.time<350)focusArm={time:now,x:e.clientX,y:e.clientY,object:released.hit};
  if(exploded&&(!a||['focus','speaker','region'].includes(a.kind))){const hit=pick(e,true),p=hit?partOf(hit.object):null;if(p&&!busy){const at=p.getWorldPosition(new THREE.Vector3()),direction=camera.position.clone().sub(controls.target).normalize();moveCamera(at.clone().addScaledVector(direction,10),at,900);sceneState='PART_FOCUS';}return;}
+ if(a?.kind==='lyrics'){lyricNoteTap(e,now-released.time<300);return;}
  if(a)act(a,e);
 }
 canvas.addEventListener('pointerup',release,{capture:true});
-canvas.addEventListener('pointercancel',e=>{if(tapeDrag)finishTapeDrag(false);activePointers.delete(e.pointerId);clearTimeout(longPress);down=null;drag=null;focusArm=null;lastServiceTap=null;endScan();controls.enabled=true;});
-window.addEventListener('blur',()=>{if(tapeDrag)finishTapeDrag(false);for(const [code,held]of Object.entries(heldArrows)){clearTimeout(held.timer);delete heldArrows[code];}activePointers.clear();clearTimeout(longPress);focusArm=null;lastServiceTap=null;endScan();drag=null;down=null;controls.enabled=true;});
-canvas.addEventListener('dblclick',e=>{e.preventDefault();if(!busy&&!pick(e,true)&&!pick(e))overview();});
+canvas.addEventListener('pointerleave',()=>{lyricWorld.setHovered(-1);hoverRing.visible=false;});
+canvas.addEventListener('pointercancel',e=>{lyricWorld.setHovered(-1);if(tapeDrag)finishTapeDrag(false);activePointers.delete(e.pointerId);clearTimeout(longPress);down=null;drag=null;focusArm=null;lastServiceTap=null;endScan();controls.enabled=true;});
+window.addEventListener('blur',()=>{lyricWorld.setHovered(-1);if(tapeDrag)finishTapeDrag(false);for(const [code,held]of Object.entries(heldArrows)){clearTimeout(held.timer);delete heldArrows[code];}activePointers.clear();clearTimeout(longPress);focusArm=null;lastServiceTap=null;endScan();drag=null;down=null;controls.enabled=true;});
+canvas.addEventListener('dblclick',e=>{e.preventDefault();if(performance.now()-lastLyricToggle<500||actionOf(pick(e)?.object)?.kind==='lyrics')return;if(!busy&&!pick(e,true)&&!pick(e))overview();});
 canvas.addEventListener('wheel',e=>{const hit=pick(e),a=hit?actionOf(hit.object):null;if(a?.kind==='knob'&&!busy){e.preventDefault();e.stopImmediatePropagation();unlockAudio();lastInteraction=performance.now();cameraMotion=null;setKnob(a.value,knobs[a.value].value-Math.sign(e.deltaY)*(e.shiftKey?.003:.015),e.shiftKey);}}, {passive:false,capture:true});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 controls.addEventListener('start',()=>{lastInteraction=performance.now();cameraMotion=null;});
 let dragDepth=0;window.addEventListener('dragenter',e=>{e.preventDefault();dragDepth++;finishIntro();focusCabinet();status('DROP TO FILE INTO THE ARCHIVE');});window.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';});window.addEventListener('dragleave',e=>{e.preventDefault();dragDepth=Math.max(0,dragDepth-1);});window.addEventListener('drop',e=>{e.preventDefault();unlockAudio();dragDepth=0;addFiles(e.dataTransfer.files,'archive');});
-const heldArrows={};function wallpaperOrbit(active){if(!wallpaperMode)return;controls.enabled=active;controls.enableZoom=active;if(!active)controls.resetState?.();}window.addEventListener('keydown',e=>{if(e.key==='Alt')wallpaperOrbit(true);if(settings.active){if(e.code==='Escape')settings.close();return;}if(inspector.active&&e.code==='Escape'){inspector.close();return;}if(e.target.closest?.('#tape-inspector')||e.target.tagName==='INPUT'||e.metaKey||e.ctrlKey)return;lastInteraction=performance.now();finishIntro();unlockAudio();if(['Space','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.code))e.preventDefault();if(e.repeat&&!['ArrowUp','ArrowDown'].includes(e.code))return;switch(e.code){case'Space':playerState.playing?pause():play();break;case'KeyS':stop();break;case'KeyE':eject();break;case'KeyM':mute();break;case'KeyX':toggleExplode();break;case'Escape':case'Digit0':if(tapeDrag)finishTapeDrag(false);else overview();break;case'Digit1':focusRegion('left');break;case'Digit2':focusRegion('center');break;case'Digit3':focusRegion('right');break;case'Digit4':focusRegion('top');break;case'ArrowUp':setVolume(Math.min(1,playerState.volume+.04));break;case'ArrowDown':setVolume(Math.max(0,playerState.volume-.04));break;case'ArrowLeft':case'ArrowRight':heldArrows[e.code]={time:performance.now(),timer:setTimeout(()=>startScan(e.code==='ArrowRight'?1:-1),230)};break;}});
+const heldArrows={};function wallpaperOrbit(active){if(!wallpaperMode)return;controls.enabled=active;controls.enableZoom=active;if(!active)controls.resetState?.();}window.addEventListener('keydown',e=>{if(e.key==='Alt')wallpaperOrbit(true);if(settings.active){if(e.code==='Escape')settings.close();return;}if(inspector.active&&e.code==='Escape'){inspector.close();return;}if(e.target.closest?.('#tape-inspector')||e.target.tagName==='INPUT'||e.metaKey||e.ctrlKey)return;lastInteraction=performance.now();finishIntro();unlockAudio();if(['Space','ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.code))e.preventDefault();if(e.repeat&&!['ArrowUp','ArrowDown'].includes(e.code))return;switch(e.code){case'Space':playerState.playing?pause():play();break;case'KeyL':lyricWorld.toggle();queueArchiveSave();break;case'KeyS':stop();break;case'KeyE':eject();break;case'KeyM':mute();break;case'KeyX':toggleExplode();break;case'Escape':case'Digit0':if(tapeDrag)finishTapeDrag(false);else overview();break;case'Digit1':focusRegion('left');break;case'Digit2':focusRegion('center');break;case'Digit3':focusRegion('right');break;case'Digit4':focusRegion('top');break;case'ArrowUp':setVolume(Math.min(1,playerState.volume+.04));break;case'ArrowDown':setVolume(Math.max(0,playerState.volume-.04));break;case'ArrowLeft':case'ArrowRight':heldArrows[e.code]={time:performance.now(),timer:setTimeout(()=>startScan(e.code==='ArrowRight'?1:-1),230)};break;}});
 window.addEventListener('keyup',e=>{if(e.key==='Alt')wallpaperOrbit(false);const held=heldArrows[e.code];if(held){clearTimeout(held.timer);if(performance.now()-held.time<230)next(e.code==='ArrowRight'?1:-1);else endScan();delete heldArrows[e.code];}});window.addEventListener('blur',()=>wallpaperOrbit(false));
 
 // One render loop reads the same state as pointer, keyboard and system media controls.
@@ -754,7 +806,7 @@ const serviceBounds=parts.filter(p=>[shell,rear,top,leftside,rightside,...speake
 function pushOutside(point,box){if(!box.containsPoint(point))return;const candidates=[['x',box.min.x-.04],['x',box.max.x+.04],['y',box.max.y+.04],['z',box.min.z-.04],['z',box.max.z+.04]];candidates.sort((a,b)=>Math.abs(a[1]-point[a[0]])-Math.abs(b[1]-point[b[0]]));point[candidates[0][0]]=candidates[0][1];}
 function constrainCamera(){camera.position.y=Math.max(.58,camera.position.y);if(!exploded){model.updateWorldMatrix(true,false);const local=model.worldToLocal(camera.position.clone());pushOutside(local,cabinetBounds);camera.position.copy(model.localToWorld(local));}else for(const {p,box}of serviceBounds){const local=p.worldToLocal(camera.position.clone());if(box.containsPoint(local)){pushOutside(local,box);camera.position.copy(p.localToWorld(local));}}camera.lookAt(controls.target);}
 
-function frame(now){requestAnimationFrame(frame);if(!bootReady||document.hidden||(wallpaperMode&&window.__wallpaperSleeping)){previous=now;return;}targetFrameRate=wallpaperMode?(window.__wallpaperInactive?15:(busy||down||cameraMotion||tapeDrag||now-lastInteraction<1800?45:playerState.playing?30:24)):(busy||down||cameraMotion||lensMotion.moving||adAnimating||recorder.state.phase==='encoding'||!introDone||now-lastInteraction<1500?60:playerState.playing?30:20);if(recorder.state.phase==='encoding'&&!busy&&!down&&!cameraMotion)targetFrameRate=30;if(now-lastFrame<1000/targetFrameRate-.5)return;lastFrame=now;renderer.info.reset();const dt=Math.min((now-previous)/1000,.05);previous=now;fps=THREE.MathUtils.damp(fps,1/Math.max(dt,.001),2,dt);if(now-shadowTick>(wallpaperMode?180:100)&&(!introDone||busy||adAnimating||Math.abs(door.rotation.x-doorTarget)>.001||people.some(p=>p.until>now))){renderer.shadowMap.needsUpdate=true;shadowTick=now;}
+function frame(now){requestAnimationFrame(frame);if(!bootReady||document.hidden||(wallpaperMode&&window.__wallpaperSleeping)){previous=now;return;}targetFrameRate=wallpaperMode?(window.__wallpaperInactive?15:(busy||down||cameraMotion||tapeDrag||now-lastInteraction<1800?45:playerState.playing?30:24)):(busy||down||cameraMotion||lyricWorld.moving||lensMotion.moving||adAnimating||recorder.state.phase==='encoding'||!introDone||now-lastInteraction<1500?60:playerState.playing?30:20);if(recorder.state.phase==='encoding'&&!busy&&!down&&!cameraMotion)targetFrameRate=30;if(now-lastFrame<1000/targetFrameRate-.5)return;lastFrame=now;renderer.info.reset();const dt=Math.min((now-previous)/1000,.05);previous=now;fps=THREE.MathUtils.damp(fps,1/Math.max(dt,.001),2,dt);if(now-shadowTick>(wallpaperMode?180:100)&&(!introDone||busy||adAnimating||Math.abs(door.rotation.x-doorTarget)>.001||lyricWorld.paperMoving||people.some(p=>p.until>now))){renderer.shadowMap.needsUpdate=true;shadowTick=now;}
 const recorderMoving=recorder.tick(dt,now),cabinetMoving=cabinet.tick(dt,now,exploded);
 if(recorderMoving||cabinetMoving)mechanismShadowDirty=true;
 if(mechanismShadowDirty&&now-shadowTick>100){renderer.shadowMap.needsUpdate=true;shadowTick=now;mechanismShadowDirty=false;}
@@ -802,24 +854,25 @@ for(const [kind,selector]of Object.entries(topSelectors)){const index=selectorVa
 
 activeCounter=THREE.MathUtils.damp(activeCounter,progress*999,12,dt);digitRollers.forEach((g,i)=>{const divisor=10**(2-i);let value=activeCounter/divisor;const whole=Math.floor(value),frac=value-whole;value=i===2?value:whole+Math.max(0,(frac-.94)/.06);g.rotation.x=value*Math.PI*2/10;});
 if(now-displayTick>130){displayTick=now;let text=errorText||((now<statusUntil)?transientStatus:(playerState.muted||playerState.volume<=0)?(loaded?`${playerState.muted?'MUTED':'VOL 0'}  ${String(playerState.currentTrack+1).padStart(2,'0')} ${formatTime(playerState.currentTime)} / ${formatTime(playerState.duration)}`:'SPEAKERS OFF'):loaded?`${String(playerState.currentTrack+1).padStart(2,'0')} ${formatTime(playerState.currentTime)} / ${formatTime(playerState.duration)}`:focused?'NO TAPE   /   EJECT':'STANDBY   —   C82');if(text!==lastDisplay){lcd.userData.setText(text);lastDisplay=text;}}
+const lyricTrack=loaded?playerState.playlist[playerState.currentTrack]:null;loadStoredLyrics(lyricTrack);lyricWorld.update(dt,lyricTrack,playerState.currentTime);
 ledMaterial.emissiveIntensity=playerState.playing?.8:.18;
 if(tapeDrag&&!tapeDrag.finishing&&tapeDrag.lifted){const d=tapeDrag;smoothTapeMotion(d.object.position,d.velocity,d.target,dt);d.object.scale.setScalar(THREE.MathUtils.damp(d.object.scale.x,d.ready?1:.62,12,dt));}
 if(dragDepth)M.smoke.opacity=.34;else M.smoke.opacity=.2;
 lensOptics.render(now,lensMotion.phase==='held');
 const needsBokeh=!wallpaperMode&&!mobile&&focused&&!cameraMotion&&sceneState==='PART_FOCUS'&&!lensMotion.active;
-if(needsBokeh){if(!composer)createFocusComposer();bokeh.enabled=true;bokeh.uniforms.focus.value=camera.position.distanceTo(controls.target);composer.render();}
-else{if(composer){for(const pass of composer.passes)pass.dispose?.();composer.dispose();composer=null;bokeh=null;}renderer.render(scene,camera);}}
+if(needsBokeh||renderQuality){if(!composer)createFocusComposer();bokeh.enabled=needsBokeh;bokeh.uniforms.focus.value=camera.position.distanceTo(controls.target);composer.render();}
+else{destroyComposer();renderer.render(scene,camera);}}
 renderer.shadowMap.needsUpdate=true;
 requestAnimationFrame(frame);
 
 // Persistence is independent of rendering and uses committed transaction completion.
-const inspector=createMagnifier({onOpen:()=>{lensMotion.setRaised(false);lastInteraction=performance.now();},onSearch:reason=>{if(lensMotion.active){lensMotion.setRaised(false);controls.minDistance=8;if(reason!=='physical')focusCabinet();}lastInteraction=performance.now();},getTracks:()=>playerState.playlist,getLocation:t=>t.onRecorder?'刻录机出口':currentTapeId()===t.id?'磁带机内':t.sourceRequired?'需要重新导入源文件':'专辑柜',onClose:()=>{lensMotion.setRaised(false);lastInteraction=performance.now();controls.minDistance=8;focusCabinet();canvas.focus({preventScroll:true});},onLocate:track=>{
+const inspector=createMagnifier({onOpen:()=>{lensMotion.setRaised(false);lastInteraction=performance.now();},onSearch:reason=>{if(lensMotion.active){lensMotion.setRaised(false);controls.minDistance=8;if(reason!=='physical')focusCabinet();}lastInteraction=performance.now();},getTracks:()=>[...playerState.playlist].sort((a,b)=>flatCabinetSlot(a)-flatCabinetSlot(b)),onOrganize:organizeCabinet,onDelete:deleteInspectorTapes,getLocation:t=>t.onRecorder?'刻录机出口':currentTapeId()===t.id?'磁带机内':t.sourceRequired?'需要重新导入源文件':'专辑柜',onClose:()=>{lensMotion.setRaised(false);lastInteraction=performance.now();controls.minDistance=8;focusCabinet();canvas.focus({preventScroll:true});},onLocate:track=>{
  if(busy||archiveOperation){status('WAIT FOR MECHANISM');return;}const index=playerState.playlist.findIndex(t=>t.id===track.id);if(index<0)return;
  lensMotion.setRaised(true);lastInteraction=performance.now();
  if(track.onRecorder){focusRecorder();return;}if(currentTapeId()===track.id){focusRegion('tape');return;}
  cabinet.state.selectedTape=track.id;cabinet.state.removeArmed=null;cabinet.reveal(index);cabinet.refresh(currentTapeId());controls.minDistance=3;const {d,point}=cabinet.locate(track);point.y+=d.y+.17;point.z+=d.target;cabinet.root.updateWorldMatrix(true,false);const target=cabinet.root.localToWorld(point);if(innerWidth<650)target.y-=2.4;focused=true;focusArea='inspection';sceneState='TAPE_INSPECTION';moveCamera(fitRegionPosition(target,new THREE.Vector3(.3,4.3,3),3.2),target,750);renderer.shadowMap.needsUpdate=true;queueArchiveSave();
 }});
-const settings=createSettings({getFolder:()=>localAlbums.handle?.name||'',chooseFolder:async()=>{await localAlbums.choose();status(localAlbums.message,5000);},read:()=>({volume:Math.round(playerState.volume*100),effects:effectsEnabled,shuffle:selectorValue('shuffle'),repeat:selectorValue('repeat'),stereo:selectorValue('stereo')}),change:(key,value)=>{unlockAudio();if(key==='volume')setVolume(value/100);else if(key==='effects'){effectsEnabled=value;queueArchiveSave();}else applySelector(key,value);},onOpen:()=>{finishIntro();if(inspector.active)inspector.close();controls.enabled=false;},onClose:()=>{controls.enabled=!wallpaperMode;lastInteraction=performance.now();}});
+const settings=createSettings({getFolder:()=>localAlbums.handle?.name||'',chooseLyrics:()=>lyricInput.click(),chooseFolder:async()=>{await localAlbums.choose();status(localAlbums.message,5000);},read:()=>({onlineLyrics,renderQuality,renderSupported:!mobile&&!wallpaperMode,volume:Math.round(playerState.volume*100),effects:effectsEnabled,shuffle:selectorValue('shuffle'),repeat:selectorValue('repeat'),stereo:selectorValue('stereo')}),change:(key,value)=>{if(key==='onlineLyrics'){onlineLyrics=value;queueArchiveSave();return;}if(key==='renderQuality'){setRenderQuality(value);queueArchiveSave();return;}unlockAudio();if(key==='volume')setVolume(value/100);else if(key==='effects'){effectsEnabled=value;queueArchiveSave();}else applySelector(key,value);},onOpen:()=>{finishIntro();if(inspector.active)inspector.close();controls.enabled=false;},onClose:()=>{controls.enabled=!wallpaperMode;lastInteraction=performance.now();}});
 if(mobile){const nav=document.createElement('nav');nav.id='mobile-tools';nav.setAttribute('aria-label','手机快捷操作');for(const [name,run]of [['设置',()=>settings.open()],['全景',overview],['收藏',focusCabinet],['放大镜',()=>{focusCabinet();inspector.open();}],['刻录',()=>{focusRecorder();requestImport('recorder');}],['播放',()=>{unlockAudio();playerState.playing?pause():play();}]]){const button=document.createElement('button');button.textContent=name;button.type='button';button.onclick=run;nav.append(button);}nav.addEventListener('keydown',e=>e.stopPropagation());document.body.append(nav);}
 const archive=new ArchiveDB();const localAlbums=new LocalAlbums(archive);
 async function chooseAlbumFolder(){try{if(await localAlbums.choose()){for(const t of playerState.playlist.filter(t=>t.format==='MP3'&&(t.recorded||t.onRecorder)))await localAlbums.save(t);}status(localAlbums.message,6500);}catch(e){if(e.name!=='AbortError')status('FOLDER ACCESS FAILED',5000);}}
@@ -828,7 +881,7 @@ function currentTapeId(){return loaded?playerState.playlist[playerState.currentT
 function archiveFailure(e){const message=e?.name==='QuotaExceededError'?'ARCHIVE FULL':e?.message==='ARCHIVE OFFLINE'?'ARCHIVE OFFLINE':'SAVE ERROR';status(message,7000);cabinet.count.userData.setText(message);}
 async function checkStorage(){if(!navigator.storage?.estimate)return;try{const {usage,quota}=await navigator.storage.estimate();storageInfo={usage,quota};if(quota&&usage/quota>.85){status('LOW STORAGE',6000);cabinet.count.userData.setText('LOW STORAGE');}}catch{}}
 function ensureTrackURL(index){const t=playerState.playlist[index];if(!t)return null;if(!t.objectURL&&t.audioBlob)t.objectURL=URL.createObjectURL(t.audioBlob);return t.objectURL;}
-function preferenceSnapshot(){return {effectsEnabled,volume:playerState.volume,bass:playerState.bass,treble:playerState.treble,eq:[...playerState.eq],shuffle:playerState.shuffle,repeatMode:playerState.repeatMode,stereoMono:playerState.stereoMono,mobileQuality:qualityRatio,lastSelectedAlbum:playerState.playlist.find(t=>t.id===cabinet.state.selectedTape)?.album||null,style:currentStyle};}
+function preferenceSnapshot(){return {onlineLyrics,ambientLyrics:lyricWorld.state.enabled,renderQuality,effectsEnabled,volume:playerState.volume,bass:playerState.bass,treble:playerState.treble,eq:[...playerState.eq],shuffle:playerState.shuffle,repeatMode:playerState.repeatMode,stereoMono:playerState.stereoMono,mobileQuality:qualityRatio,lastSelectedAlbum:playerState.playlist.find(t=>t.id===cabinet.state.selectedTape)?.album||null,style:currentStyle};}
 function sessionSnapshot(){
  if(busy||tapeDrag||cameraMotion||scan||adAnimating||archiveOperation)return lastStableSession;
  const session={currentTrackId:currentTapeId(),currentTime:playerState.currentTime,tapeInserted:loaded,cabinetOpen:!!cabinet.state.activeDrawer,activeDrawer:cabinet.state.activeDrawer,pages:{...cabinet.state.pages},selectedTape:cabinet.state.selectedTape,cameraPosition:camera.position.toArray(),cameraTarget:controls.target.toArray(),explodedView:exploded,focusedPart:focusArea,lastStableState:sceneState,doorOpen:doorTarget>0,wasPlaying:playerState.playing,updatedAt:Date.now(),...preferenceSnapshot()};
@@ -846,16 +899,26 @@ async function removeSelected(){const id=cabinet.state.selectedTape,t=playerStat
  serviceConfirm=null;await deleteArchiveTracks([t]);
 }
 async function deleteArchiveTracks(tracksToDelete,clear=false){
- if(busy||archiveOperation)return;archiveOperation=true;const ids=new Set(tracksToDelete.map(t=>t.id));
+ if(busy||archiveOperation)return false;archiveOperation=true;let completed=false;const ids=new Set(tracksToDelete.map(t=>t.id));
  try{
   if(ids.has(currentTapeId()))await unloadTape();
   if(ids.has(recorder.state.trackId))recorder.clear();
   const remaining=playerState.playlist.filter(t=>!ids.has(t.id)),playingId=currentTapeId();
-  if(archive.db){if(clear)await archive.clear();else for(const t of tracksToDelete)await archive.remove(t,remaining);}
+  if(archive.db){if(clear)await archive.clear();else await archive.removeTracks(tracksToDelete,remaining);}
   for(const t of tracksToDelete){if(t.objectURL)URL.revokeObjectURL(t.objectURL);if(t.cover)URL.revokeObjectURL(t.cover);}
-  playerState.playlist=remaining;playerState.currentTrack=playingId?remaining.findIndex(t=>t.id===playingId):-1;cabinet.state.selectedTape=null;cabinet.rebuild(remaining,playingId);status(clear?'ARCHIVE CLEARED':'TAPE REMOVED',4000);lastStableSession=null;
- }catch(e){archiveFailure(e);}finally{archiveOperation=false;queueArchiveSave();checkStorage();}
+  playerState.playlist=remaining;playerState.currentTrack=playingId?remaining.findIndex(t=>t.id===playingId):-1;cabinet.state.selectedTape=null;cabinet.rebuild(remaining,playingId);status(clear?'ARCHIVE CLEARED':'TAPE REMOVED',4000);lastStableSession=null;completed=true;
+ }catch(e){archiveFailure(e);}finally{archiveOperation=false;queueArchiveSave();checkStorage();}return completed;
 }
+async function organizeCabinet(mode){
+ if(!bootReady||busy||archiveOperation||recorder.state.phase==='encoding')throw Error('设备正在工作，请稍后再整理。');
+ archiveOperation=true;try{const updates=planCabinetOrder(playerState.playlist,mode);if(archive.db)await archive.updateSlots(updates);const byId=new Map(updates.map(u=>[u.id,u.cabinetSlot]));for(const t of playerState.playlist)t.cabinetSlot=byId.get(t.id);cabinet.rebuild(playerState.playlist,currentTapeId());const selected=playerState.playlist.findIndex(t=>t.id===cabinet.state.selectedTape);if(selected>=0)cabinet.reveal(selected);else cabinet.state.pages.A01=0;cabinet.refresh(currentTapeId());lastStableSession=null;renderer.shadowMap.needsUpdate=true;reactPeople('archive');return updates.length;}catch(e){archiveFailure(e);throw Error('整理未完成，原有柜内顺序已保留。');}finally{archiveOperation=false;queueArchiveSave();}
+}
+async function deleteInspectorTapes(ids){
+ if(!bootReady||busy||archiveOperation||recorder.state.phase==='encoding')throw Error('设备正在工作，请稍后再删除。');
+ const selected=new Set(ids),tracks=playerState.playlist.filter(t=>selected.has(t.id));if(!tracks.length)return 0;
+ if(!await deleteArchiveTracks(tracks))throw Error('删除未完成，请稍后重试。');return tracks.length;
+}
+
 async function resetMachine(){if(busy||archiveOperation)return;if(loaded)await unloadTape();if(exploded)await toggleExplode();Object.assign(playerState,{volume:.68,muted:false,bass:0,treble:0,eq:[0,0,0,0,0],shuffle:false,repeatMode:'off',stereoMono:false});knobs.volume.value=.68;knobs.bass.value=knobs.treble.value=.5;cabinet.setOpen(null,false);syncAudio();overview();status('MACHINE RESET / ARCHIVE KEPT',5000);queueArchiveSave();}
 function archiveAction(kind,value,event){
  if(!['cabinet','drawer','archivePage','archiveImport','recorderImport','archiveService','recorderTape','recorderSave','resetMachine','clearArchive'].includes(kind))return false;
@@ -874,7 +937,7 @@ function archiveAction(kind,value,event){
 const archiveServicePanel=group(rear,0,0,-.2);archiveServicePanel.rotation.y=Math.PI;
 box(archiveServicePanel,3.5,1.05,.1,0,-.75,0,M.dark);label(archiveServicePanel,'ARCHIVE SERVICE / DOUBLE CONFIRM',3.25,.13,0,-.42,.06,{mono:true,color:'#dacbb0',res:512});
 for(const [kind,title,x,material]of [['resetMachine','RESET MACHINE',-.84,M.cream],['clearArchive','CLEAR ARCHIVE',.84,M.orange]]){const button=box(archiveServicePanel,1.5,.32,.12,x,-.82,.13,material);interactive(button,kind);label(button,title,1.35,.12,0,0,.069,{mono:true,res:256});}
-function applyPreferences(p){playerState.muted=false;if(!p)return;if(typeof p.effectsEnabled==='boolean')effectsEnabled=p.effectsEnabled;for(const key of ['shuffle','stereoMono'])if(typeof p[key]==='boolean')playerState[key]=p[key];for(const [key,min,max]of [['volume',0,1],['bass',-12,12],['treble',-12,12]])if(Number.isFinite(p[key]))playerState[key]=THREE.MathUtils.clamp(p[key],min,max);if(Array.isArray(p.eq)&&p.eq.length===5)playerState.eq=p.eq.map(v=>Number.isFinite(v)?THREE.MathUtils.clamp(v,-12,12):0);if(['off','one','all'].includes(p.repeatMode))playerState.repeatMode=p.repeatMode;knobs.volume.value=playerState.volume;knobs.bass.value=playerState.bass/24+.5;knobs.treble.value=playerState.treble/24+.5;if(mobile&&Number.isFinite(p.mobileQuality)){qualityRatio=THREE.MathUtils.clamp(p.mobileQuality,.75,1.35);renderer.setPixelRatio(qualityRatio);}syncAudio();}
+function applyPreferences(p){playerState.muted=false;if(!p)return;if(typeof p.onlineLyrics==='boolean')onlineLyrics=p.onlineLyrics;setRenderQuality(p.renderQuality);lyricWorld.setEnabled(p.ambientLyrics);if(typeof p.effectsEnabled==='boolean')effectsEnabled=p.effectsEnabled;for(const key of ['shuffle','stereoMono'])if(typeof p[key]==='boolean')playerState[key]=p[key];for(const [key,min,max]of [['volume',0,1],['bass',-12,12],['treble',-12,12]])if(Number.isFinite(p[key]))playerState[key]=THREE.MathUtils.clamp(p[key],min,max);if(Array.isArray(p.eq)&&p.eq.length===5)playerState.eq=p.eq.map(v=>Number.isFinite(v)?THREE.MathUtils.clamp(v,-12,12):0);if(['off','one','all'].includes(p.repeatMode))playerState.repeatMode=p.repeatMode;knobs.volume.value=playerState.volume;knobs.bass.value=playerState.bass/24+.5;knobs.treble.value=playerState.treble/24+.5;if(mobile&&Number.isFinite(p.mobileQuality)){qualityRatio=THREE.MathUtils.clamp(p.mobileQuality,.75,1.35);renderer.setPixelRatio(qualityRatio);}syncAudio();}
 async function restoreArchive(){
  sceneState='BOOT';let session,prefs;
  try{await archive.open();prefs=await archive.get('preferences','current');applyPreferences(prefs);const rows=(await archive.all('tracks')).sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)||String(a.id).localeCompare(String(b.id)));const restored=[];
@@ -913,4 +976,4 @@ window.addEventListener('resize',()=>resizeWorld());window.addEventListener('ori
 // Feature-detected tools share precisely the same actions as physical controls.
 if(document.modelContext?.registerTool){const controller=new AbortController();const register=tool=>{try{Promise.resolve(document.modelContext.registerTool(tool,{signal:controller.signal})).catch(()=>{});}catch{}};register({name:'read_cassette_state',description:'Read local cassette player state and imported tape names.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:true},execute:()=>({...window.cassetteWorld.state,positions:window.cassetteWorld.objectPositions})});register({name:'control_cassette',description:'Operate the physical cassette transport or service view.',inputSchema:{type:'object',properties:{action:{type:'string',enum:['play','pause','stop','eject','next','previous','service']}},required:['action'],additionalProperties:false},execute:async({action})=>{const actions={play,pause,stop,eject,next,previous:()=>next(-1),service:toggleExplode};if(!Object.hasOwn(actions,action))throw Error('Unknown action');if(busy)throw Error('Mechanical transition in progress');await actions[action]();if(busy)await new Promise(resolve=>{const check=()=>busy?setTimeout(check,100):resolve();check();});return {transport:transportState,playing:playerState.playing,service:exploded};}});window.addEventListener('pagehide',()=>controller.abort(),{once:true});}
 // A read-only diagnostic surface is useful for local verification and never shown onscreen.
-window.cassetteWorld={get state(){return {...playerState,playlist:playerState.playlist.map(({objectURL,cover,audioBlob,originalBlob,artworkBlob,...t})=>t),version:'5.9',settingsOpen:settings.active,effectsEnabled,lensPhase:lensMotion.phase,inspecting:inspector.active,localAlbums:{selected:!!localAlbums.handle,saved:localAlbums.saved,message:localAlbums.message},recorder:{...recorder.state},archive:{ready:bootReady,persistent:!!archive.db,drawer:cabinet.state.activeDrawer,selected:cabinet.state.selectedTape,storage:storageInfo,renderedTapes:cabinet.drawers.reduce((n,d)=>n+d.contents.children.length,0)},device,camera:{position:camera.position.toArray(),target:controls.target.toArray(),aspect:camera.aspect},performance:{fps:Math.round(fps),targetFrameRate,pixelRatio:renderer.getPixelRatio(),geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures},style:currentStyle,styleAnimating,importChannel,pendingTimelines:timelines.length,hidden:document.hidden,advertisements:{order:[...adOrder],animating:adAnimating},tapeDrag:tapeDrag?{index:tapeDrag.index,origin:tapeDrag.origin,ready:tapeDrag.ready}:null,focusArea,formats:AUDIO_EXTENSIONS,error:errorText,foley:foley?.events||[],people:people.map(p=>({pose:p.pose,model:p.g.userData.variant,activity:performance.now()<p.until?p.activity:'idle',arm:p.arms[1].rotation.z})),sceneState,transportState,exploded,busy,loaded,door:door.rotation.x,drawCalls:renderer.info.render.calls,fps:Math.round(fps),response:{bass:smoothBass,left:smoothLevelL,right:smoothLevelR},filterGains:filters?.map(f=>f.gain.value),volumeGain:gain?.gain.value,peakReduction:limiter?.reduction,audioChain:{context:context?.state??'none',elementVolume:audio.volume,elementMuted:audio.muted,readyState:audio.readyState,networkState:audio.networkState,mediaError:audio.error?.code??null,src:audio.currentSrc?'blob':'none',hasSource:!!source,hasGain:!!gain},mechanics:{reels:tapeModel.userData.spool.map(s=>({angle:s.reel.rotation.z,radius:s.wound.scale.x})),play:buttons.play.position.z,pause:buttons.pause.position.z,capExposure:transport.position.z+buttons.play.position.z+.16-(shell.position.z+.235),needle:vuNeedles[0].rotation.z}};},get objectPositions(){const out={};for(const [id,k]of Object.entries(buttons)){const p=k.getWorldPosition(new THREE.Vector3()).project(camera);out[id]=[(p.x+1)*innerWidth/2,(1-p.y)*innerHeight/2];}for(const [id,k]of Object.entries(knobs)){const p=k.part.getWorldPosition(new THREE.Vector3()).project(camera);out[id]=[(p.x+1)*innerWidth/2,(1-p.y)*innerHeight/2];}for(const [id,g]of [['door',doorPart],['import',importPlate],['eq',eqPart],...eqSliders.map((g,i)=>['eq'+i,g]),['stereo',stereoSwitch.group],['shuffle',randomSwitch.group],['repeat',repeatSwitch.group],['stereoTab',stereoSwitch.tab],['shuffleTab',randomSwitch.tab],['repeatTab',repeatSwitch.tab],['tape',loadedTape],['service',servicePoint],...adPages.map((p,i)=>['ad-corner-'+i,p.corner]),...libraryTapes.map((g,i)=>['archive-'+i,g]),['settings',toolbox],['magnifier',magnifyingGlass],['cabinet',cabinet.root],['cabinetImport',cabinet.add],['recorderImport',recorder.key],['recorder',recorder.root],['recorderSave',recorder.save],['recorderFolder',recorder.folder],...adPages.map((p,i)=>['ad-page-'+i,p.focusLabel]),...(recorder.output?[['recorderTape',recorder.output]]:[]),['archiveService',cabinet.service],...cabinet.drawers.map(d=>['drawer-'+d.id,d.handle]),...styleCards.map(c=>['style-'+c.style.id,c.picture]),...people.map((p,i)=>['person'+i,p.head])]){const p=g.getWorldPosition(new THREE.Vector3()).project(camera);out[id]=[(p.x+1)*innerWidth/2,(1-p.y)*innerHeight/2];}return out;}};
+window.cassetteWorld={get state(){return {...playerState,playlist:playerState.playlist.map(({objectURL,cover,audioBlob,originalBlob,artworkBlob,...t})=>t),version:'5.14',lyrics:{...lyricWorld.state,onlineEnabled:onlineLyrics,lookup:{...lyricLookup.state},position:lyricWorld.root.position.toArray(),paperAngle:lyricWorld.hinge.rotation.x},rendering:{...studioRendering.state,quality:renderQuality?'photographic':'balanced',occlusionScale:renderQuality?.5:0},settingsOpen:settings.active,effectsEnabled,lensPhase:lensMotion.phase,inspecting:inspector.active,localAlbums:{selected:!!localAlbums.handle,saved:localAlbums.saved,message:localAlbums.message},recorder:{...recorder.state},archive:{ready:bootReady,persistent:!!archive.db,drawer:cabinet.state.activeDrawer,selected:cabinet.state.selectedTape,storage:storageInfo,renderedTapes:cabinet.drawers.reduce((n,d)=>n+d.contents.children.length,0)},device,camera:{position:camera.position.toArray(),target:controls.target.toArray(),aspect:camera.aspect},performance:{fps:Math.round(fps),targetFrameRate,pixelRatio:renderer.getPixelRatio(),geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures},style:currentStyle,styleAnimating,importChannel,pendingTimelines:timelines.length,hidden:document.hidden,advertisements:{order:[...adOrder],animating:adAnimating},tapeDrag:tapeDrag?{index:tapeDrag.index,origin:tapeDrag.origin,ready:tapeDrag.ready}:null,focusArea,formats:AUDIO_EXTENSIONS,error:errorText,foley:foley?.events||[],people:people.map(p=>({pose:p.pose,model:p.g.userData.variant,activity:performance.now()<p.until?p.activity:'idle',arm:p.arms[1].rotation.z})),sceneState,transportState,exploded,busy,loaded,door:door.rotation.x,drawCalls:renderer.info.render.calls,fps:Math.round(fps),response:{bass:smoothBass,left:smoothLevelL,right:smoothLevelR},filterGains:filters?.map(f=>f.gain.value),volumeGain:gain?.gain.value,peakReduction:limiter?.reduction,audioChain:{context:context?.state??'none',elementVolume:audio.volume,elementMuted:audio.muted,readyState:audio.readyState,networkState:audio.networkState,mediaError:audio.error?.code??null,src:audio.currentSrc?'blob':'none',hasSource:!!source,hasGain:!!gain},mechanics:{reels:tapeModel.userData.spool.map(s=>({angle:s.reel.rotation.z,radius:s.wound.scale.x})),play:buttons.play.position.z,pause:buttons.pause.position.z,capExposure:transport.position.z+buttons.play.position.z+.16-(shell.position.z+.235),needle:vuNeedles[0].rotation.z}};},get objectPositions(){const out={};for(const [id,k]of Object.entries(buttons)){const p=k.getWorldPosition(new THREE.Vector3()).project(camera);out[id]=[(p.x+1)*innerWidth/2,(1-p.y)*innerHeight/2];}for(const [id,k]of Object.entries(knobs)){const p=k.part.getWorldPosition(new THREE.Vector3()).project(camera);out[id]=[(p.x+1)*innerWidth/2,(1-p.y)*innerHeight/2];}for(const [id,g]of [['door',doorPart],['import',importPlate],['eq',eqPart],...eqSliders.map((g,i)=>['eq'+i,g]),['stereo',stereoSwitch.group],['shuffle',randomSwitch.group],['repeat',repeatSwitch.group],['stereoTab',stereoSwitch.tab],['shuffleTab',randomSwitch.tab],['repeatTab',repeatSwitch.tab],['tape',loadedTape],['service',servicePoint],...adPages.map((p,i)=>['ad-corner-'+i,p.corner]),...libraryTapes.map((g,i)=>['archive-'+i,g]),['lyrics',lyricWorld.hinge],...lyricWorld.cells.filter(c=>c.root.visible).map((c,i)=>['lyric-line-'+i,c.root]),['settings',toolbox],['magnifier',magnifyingGlass],['cabinet',cabinet.root],['cabinetImport',cabinet.add],['recorderImport',recorder.key],['recorder',recorder.root],['recorderSave',recorder.save],['recorderFolder',recorder.folder],...adPages.map((p,i)=>['ad-page-'+i,p.focusLabel]),...(recorder.output?[['recorderTape',recorder.output]]:[]),['archiveService',cabinet.service],...cabinet.drawers.map(d=>['drawer-'+d.id,d.handle]),...styleCards.map(c=>['style-'+c.style.id,c.picture]),...people.map((p,i)=>['person'+i,p.head])]){const p=g.getWorldPosition(new THREE.Vector3()).project(camera);out[id]=[(p.x+1)*innerWidth/2,(1-p.y)*innerHeight/2];}return out;}};

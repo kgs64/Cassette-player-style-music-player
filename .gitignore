@@ -1,7 +1,7 @@
 .DS_Store
 node_modules/
+outputs/
 work/bundle.js
 work/decrypt-worker-source.js
-outputs/ios/
-outputs/ipad/
 *.log
+*qa.html
