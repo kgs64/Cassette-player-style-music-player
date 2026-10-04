@@ -2,13 +2,17 @@
 
 微缩复古磁带机网页：机械播放、单层专辑柜、MP3 刻录、放大镜收藏管理、双层歌词、在线 MP3 点歌器与听歌偏好卡。
 
-当前网页版本 **5.21**。5.14 备份保留在标签 `web-v5.14-before-online-terminal`，备份校验记录在 `legacy/STABLE_BACKUP-5.14.json`；仅维护网页。
+当前网页版本 **5.22**。5.14 备份保留在标签 `web-v5.14-before-online-terminal`，备份校验记录在 `legacy/STABLE_BACKUP-5.14.json`；仅维护网页。
 
 ## 在线体验
 
 [直接打开 Cassette World](https://kgs64.github.io/Cassette-player-style-music-player/)
 
 网页可以导入自己的音乐，也可使用在线点歌器。个人收藏保存在各自浏览器中，不会上传到仓库；首次打开需点击后才能播放声音。
+
+## 5.22 修复
+
+声道切换使用固定通道和平滑增益，避免切换后失声；首次在线点歌在点击时完成声音授权，装带后继续播放；连接失败保留机内磁带，按播放键可重试。Chrome 与 WebKit 已验证声道输出、装带、失败恢复和原有进度及播放列表功能。
 
 ## 使用
 
