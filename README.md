@@ -4,6 +4,12 @@
 
 当前网页版本 **5.21**。5.14 备份保留在标签 `web-v5.14-before-online-terminal`，备份校验记录在 `legacy/STABLE_BACKUP-5.14.json`；仅维护网页。
 
+## 在线体验
+
+[直接打开 Cassette World](https://kgs64.github.io/Cassette-player-style-music-player/)
+
+网页可以导入自己的音乐，也可使用在线点歌器。个人收藏保存在各自浏览器中，不会上传到仓库；首次打开需点击后才能播放声音。
+
 ## 使用
 
 下载 `cassette-world.html` 后用支持 WebGL 2 的浏览器打开，可离线导入本地音乐。静态托管使用根目录 `index.html`、`sw.js`、`manifest.webmanifest`、`icons/` 与 `third-party/`；完整部署文件在 `cassette-world-web-app.zip`。在线播放或在线补全歌词需要网络。
