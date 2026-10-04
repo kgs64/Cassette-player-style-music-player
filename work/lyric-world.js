@@ -8,18 +8,21 @@ const THEMES={
  pixel:{paper:'#e4e0ce',stand:'#878e7d',ink:'#626b57',environment:'#727964',metal:'#909c8c',pixel:true}
 };
 export function lyricTheme(id){return id==='pixel'?'pixel':id==='orbit'?'future':['night','metro','lagoon','olive','coral','timber'].includes(id)?'dark':'paper';}
+const FONT_FACES={serif:'Baskerville, Georgia, \"Songti SC\", STSong, serif',sans:'Arial, \"PingFang SC\", sans-serif',mono:'Menlo, \"Courier New\", \"PingFang SC\", monospace',rounded:'Verdana, \"PingFang SC\", sans-serif'};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
 export function createLyricWorld({props,group,box,rod,ring,interactive,TABLE_TOP,mobile,onDirty}){
+ const typography={pageSize:1,pageFont:'serif',backgroundSize:1,backgroundFont:'serif',backgroundDepth:1};
  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
  const paper=new THREE.MeshStandardMaterial({color:THEMES.paper.paper,roughness:.96,side:THREE.DoubleSide});
  const stand=new THREE.MeshStandardMaterial({color:THEMES.paper.stand,roughness:.88});
  const metal=new THREE.MeshStandardMaterial({color:THEMES.paper.metal,roughness:.33,metalness:.7});
  const root=group(props,2.4,TABLE_TOP,7.88);root.name='Lyric desk calendar';root.rotation.y=.26;interactive(root,'lyrics');
  box(root,2.50,.07,1.03,0,.035,0,stand,.025);
- for(const x of [-1.12,1.12]){
-  rod(root,[x,.085,.43],[x,1.23,-.04],.024,metal);rod(root,[x,1.23,-.04],[x,.085,-.43],.024,metal);
+ for(const x of [-1.23,1.23]){
+  rod(root,[x,.058,.28],[x,1.23,-.07],.024,metal);rod(root,[x,1.23,-.07],[x,.058,-.43],.024,metal);
  }
+ for(const x of [-1.18,1.18])for(const z of [.28,-.43])box(root,.15,.045,.16,x,.070,z,stand,.012);
  rod(root,[-1.12,.10,-.40],[1.12,.10,-.40],.024,metal);
  const back=box(root,2.31,1.17,.026,0,.665,-.238,stand,.009);back.rotation.x=.32;
  const hinge=group(root,0,1.205,-.028);hinge.rotation.x=-.40;
@@ -29,11 +32,14 @@ export function createLyricWorld({props,group,box,rod,ring,interactive,TABLE_TOP
   positions.setZ(i,.010+bottom*bottom*(.018+.030*(Math.abs(x)/1.17)**3));
  }sheet.computeVertexNormals();
  const page=new THREE.Mesh(sheet,paper);page.castShadow=page.receiveShadow=true;hinge.add(page);interactive(page,'lyrics');
- const reverse=new THREE.Mesh(sheet.clone(),paper);reverse.position.z=-.012;hinge.add(reverse);
+ const reverse=new THREE.Mesh(sheet.clone(),paper);reverse.position.z=-.028;hinge.add(reverse);
+ const rimVertices=[],rimIndices=[...Array.from({length:25},(_,i)=>i),...Array.from({length:12},(_,i)=>(i+1)*25+24),...Array.from({length:24},(_,i)=>324-i-1),...Array.from({length:11},(_,i)=>(11-i)*25)];
+ const point=i=>[positions.getX(i),positions.getY(i),positions.getZ(i)];for(let i=0;i<rimIndices.length;i++){const a=point(rimIndices[i]),b=point(rimIndices[(i+1)%rimIndices.length]),c=[...a],d=[...b];c[2]-=.028;d[2]-=.028;rimVertices.push(...a,...b,...c,...b,...d,...c);}
+ const edgeGeometry=new THREE.BufferGeometry();edgeGeometry.setAttribute('position',new THREE.Float32BufferAttribute(rimVertices,3));edgeGeometry.computeVertexNormals();const paperEdgeMaterial=paper.clone();paperEdgeMaterial.color.multiplyScalar(.91);const paperEdge=new THREE.Mesh(edgeGeometry,paperEdgeMaterial);paperEdge.castShadow=true;hinge.add(paperEdge);
  for(const x of [-.73,.73]){const binding=ring(root,.105,.016,x,1.225,-.026,metal);binding.rotation.y=Math.PI/2;}
  const hit=box(root,2.47,1.19,.035,0,.63,.20,new THREE.MeshBasicMaterial({visible:false}),0);hit.rotation.x=-.40;interactive(hit,'lyrics');
  const environment=group(props,0,0,-7.6);environment.name='Lyrics printed in backdrop space';environment.rotation.set(0,0,0);environment.visible=false;
- const textures=[],ownedMaterials=[],cells=[];
+ const textures=[],ownedMaterials=[paperEdgeMaterial],cells=[];
  const pageSize=mobile?768:1024;
  function texture(canvas){const t=new THREE.CanvasTexture(canvas);t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=4;t.minFilter=THREE.LinearMipmapLinearFilter;textures.push(t);return t;}
  function canvas(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c;}
@@ -43,13 +49,13 @@ export function createLyricWorld({props,group,box,rod,ring,interactive,TABLE_TOP
   // Preserve a printed dot character without throwing away its letter shapes.
   const scale=pixel?2:1;let target=c,ink=ctx;
   if(pixel){target=canvas(c.width/scale,c.height/scale);ink=target.getContext('2d');}
-  const w=target.width,h=target.height,face=pixel?'"Courier New", "Songti SC", monospace':'Baskerville, Georgia, "Songti SC", STSong, serif';ink.textAlign='center';ink.textBaseline='middle';ink.fillStyle=color;
+  const w=target.width,h=target.height,face=pixel?'"Courier New", "Songti SC", monospace':FONT_FACES[page?typography.pageFont:typography.backgroundFont];ink.textAlign='center';ink.textBaseline='middle';ink.fillStyle=color;
   if(page){
    ink.font=`${Math.round(h*.052)}px ${face}`;ink.globalAlpha=.60;ink.fillText('LYRIC NOTES  /  C—82',w/2,h*.11);ink.globalAlpha=1;
-   const rows=wrap(text,ink,w*.85,Math.round(h*.115),pixel).slice(0,3);
-   const size=Math.round(h*.115);ink.font=`400 ${size}px ${face}`;
+   const rows=wrap(text,ink,w*.85,Math.round(h*.115*typography.pageSize),pixel).slice(0,3);
+   const size=Math.round(h*.115*typography.pageSize);ink.font=`400 ${size}px ${face}`;
    rows.forEach((row,i)=>ink.fillText(row,w/2,h*.49+(i-(rows.length-1)/2)*size*1.30));
-   ink.font=`${Math.round(h*.044)}px ${face}`;ink.globalAlpha=.50;ink.fillText('DOUBLE TAP  /  AMBIENT LYRICS',w/2,h*.90);ink.globalAlpha=1;
+   ink.font=`${Math.round(h*.044)}px ${face}`;ink.globalAlpha=.50;ink.fillText('TAP  /  AMBIENT LYRICS',w/2,h*.90);ink.globalAlpha=1;
   }else{
    let size=h*.66;
    const line=String(text).replace(/\n/g,'  ·  ');ink.font=`400 ${size}px ${face}`;
@@ -65,7 +71,7 @@ export function createLyricWorld({props,group,box,rod,ring,interactive,TABLE_TOP
  }
  function ellipsize(text,ctx,width){if(ctx.measureText(text).width<=width)return text;let result=text;while(result.length>1&&ctx.measureText(result+'…').width>width)result=result.slice(0,-1);return result===text?result:result+'…';}
  function wrap(text,ctx,width,size,pixel){
-  ctx.font=`400 ${size}px ${pixel?'"Courier New", "Songti SC", monospace':'Baskerville, Georgia, "Songti SC", STSong, serif'}`;const rows=[];
+  ctx.font=`400 ${size}px ${pixel?'"Courier New", "Songti SC", monospace':FONT_FACES[typography.pageFont]}`;const rows=[];
   for(const paragraph of String(text).split('\n')){let row='';const tokens=paragraph.match(/[A-Za-z0-9’']+|\s+|./gu)||[];
    for(const token of tokens){if(row.trim()&&ctx.measureText(row+token).width>width){rows.push(row.trim());row='';}if(!row&&/^\s+$/.test(token))continue;
     if(ctx.measureText(token).width>width){for(const ch of Array.from(token)){if(row&&ctx.measureText(row+ch).width>width){rows.push(row.trim());row='';}row+=ch;}}else row+=token;
@@ -95,7 +101,7 @@ export function createLyricWorld({props,group,box,rod,ring,interactive,TABLE_TOP
   pageChange(index>=0?data.cues[index].text:data?.cues.length?'等待这一句开始':'歌词随磁带来到这里\n导入同名 LRC 歌词');
   state.current=index;state.currentText=index>=0?data.cues[index].text:'';
  }
- function setTheme(id){style=id;const next=lyricTheme(id);if(next===themeId)return;themeId=next;theme=THEMES[next];state.theme=next;paper.color.set(theme.paper);stand.color.set(theme.stand);metal.color.set(theme.metal);paper.roughness=next==='future'?.72:.96;renderPage(pageLayers[0],oldPageText);renderPage(pageLayers[1],pageText);for(const c of cells)paintCell(c);onDirty();}
+ function setTheme(id){style=id;const next=lyricTheme(id);if(next===themeId)return;themeId=next;theme=THEMES[next];state.theme=next;paper.color.set(theme.paper);paperEdgeMaterial.color.copy(paper.color).multiplyScalar(.91);stand.color.set(theme.stand);metal.color.set(theme.metal);paper.roughness=next==='future'?.72:.96;renderPage(pageLayers[0],oldPageText);renderPage(pageLayers[1],pageText);for(const c of cells)paintCell(c);onDirty();}
  function setHovered(slot){pressed=slot;state.hovered=slot>=0?cells[slot]?.index??-1:-1;}
  function update(dt,track,time){
   if(trackId!==(track?.id||null)||data!==(track?.lyrics||null)){trackId=track?.id||null;data=track?.lyrics||null;current=-2;setHovered(-1);for(const c of cells){c.index=null;c.alpha=0;c.targetAlpha=0;}state.hasLyrics=!!data?.cues?.length;state.timed=!!data?.timed;}
@@ -110,9 +116,9 @@ export function createLyricWorld({props,group,box,rod,ring,interactive,TABLE_TOP
   for(let i=0;i<cells.length;i++){
    const c=cells[i],target=i===pressed?1:0;c.press=THREE.MathUtils.damp(c.press,target,target?13:8,dt);if(Math.abs(c.press-target)<.002)c.press=target;
    // Keep every line centered on the machine's X axis, without a left offset.
-   c.alpha=THREE.MathUtils.damp(c.alpha,c.targetAlpha,4.5,dt);c.y=THREE.MathUtils.damp(c.y,c.targetY,4,dt);c.root.position.set(0,c.y,0);
+   c.alpha=THREE.MathUtils.damp(c.alpha,c.targetAlpha,4.5,dt);c.y=THREE.MathUtils.damp(c.y,c.targetY,4,dt);c.root.position.set(0,9.8+(c.y-9.8)*typography.backgroundSize,0);for(const layer of c.layers)layer.mesh.scale.setScalar(typography.backgroundSize);
    // Keep the background quiet under both hover and touch; no scale or offset.
-   const alpha=c.alpha*fade*(1+c.press*.27);c.layers[0].mesh.material.opacity=alpha*(1-c.press);c.layers[1].mesh.material.opacity=alpha*c.press;c.root.visible=c.alpha>.001;
+   const alpha=Math.min(.85,c.alpha*fade*typography.backgroundDepth*(1+c.press*.27));c.layers[0].mesh.material.opacity=alpha*(1-c.press);c.layers[1].mesh.material.opacity=alpha*c.press;c.root.visible=c.alpha>.001;
    active ||= Math.abs(c.press-target)>.002||Math.abs(c.alpha-c.targetAlpha)>.002||Math.abs(c.y-c.targetY)>.002;
   }
   state.opacity=fade;state.moving=active;state.enabled=enabled;
@@ -120,7 +126,8 @@ export function createLyricWorld({props,group,box,rod,ring,interactive,TABLE_TOP
  function toggle(){enabled=!enabled;state.enabled=enabled;bounce=.7;setHovered(-1);onDirty();return enabled;}
  function setEnabled(value){enabled=!!value;state.enabled=enabled;}
  function isTouchable(slot,uv){const c=cells[slot],b=c?.bounds;return environment.visible&&c?.alpha*fade>.012&&!!b&&(!uv||(uv.x>=b.x0&&uv.x<=b.x1&&uv.y>=b.y0&&uv.y<=b.y1));}
+ function configure(values={}){const previous={...typography};for(const k of ['pageSize','backgroundSize'])if(Number.isFinite(Number(values[k])))typography[k]=clamp(Number(values[k]),.65,1.6);if(Number.isFinite(Number(values.backgroundDepth)))typography.backgroundDepth=clamp(Number(values.backgroundDepth),.35,2.5);for(const k of ['pageFont','backgroundFont'])if(FONT_FACES[values[k]])typography[k]=values[k];if(previous.pageSize!==typography.pageSize||previous.pageFont!==typography.pageFont){renderPage(pageLayers[0],oldPageText);renderPage(pageLayers[1],pageText);}if(previous.backgroundFont!==typography.backgroundFont)for(const c of cells)paintCell(c);onDirty();}
  function dispose(){for(const t of textures)t.dispose();for(const m of [...ownedMaterials,paper,stand,metal])m.dispose();for(const g of [root,environment]){g.traverse(o=>o.geometry?.dispose());g.removeFromParent();}}
  pageChange('歌词随磁带来到这里\n导入同名 LRC 歌词');transition=1;
- return {root,hinge,environment,state,cells,toggle,setEnabled,setTheme,setHovered,isTouchable,update,dispose,get moving(){return state.moving;},get paperMoving(){return bounce>0;}};
+ return {root,hinge,environment,state,cells,typography,configure,toggle,setEnabled,setTheme,setHovered,isTouchable,update,dispose,get moving(){return state.moving;},get paperMoving(){return bounce>0;}};
 }

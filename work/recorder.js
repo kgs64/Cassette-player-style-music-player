@@ -9,7 +9,7 @@ export function createRecorder({parent,group,box,cyl,ring,label,interactive,M,ca
  const key=box(root,.77,.24,.13,-1.52,.40,1.09,M.orange,.025);interactive(key,'recorderImport');label(key,'IMPORT',.67,.12,0,0,.076,{mono:true,res:384,weight:800});
  interactive(box(root,2.38,.17,.12,.50,.41,1.04,M.black,.02),'recorderFocus');interactive(box(root,2.50,.035,1.05,.50,.275,1.55,M.metal,.012),'recorderFocus');
  for(const x of [-.65,.65]){const g=group(root,x,.28,-.03);g.position.y=1.13;g.rotation.x=-Math.PI/2;const reel=cyl(g,.30,.065,0,0,0,M.dark,24);for(let i=0;i<3;i++){const spoke=box(g,.055,.29,.06,0,.14,.035,M.chrome,.01);spoke.rotation.z=i*Math.PI*2/3;}reels.push(g);}
- label(root,'C—REC  /  MP3 192',2.9,.13,0,1.032,.99,{mono:true,res:256});
+ label(root,'C—REC  /  MP3 192',2.9,.068,0,.988,.979,{mono:true,res:256});
  const meter=box(root,3.35,.025,.025,0,.64,1.04,M.orange,.003);meter.scale.x=.001;
  const save=box(root,.75,.2,.08,-1.52,.09,1.11,M.dark,.01);interactive(save,'recorderSave');label(save,'MP3 ↓',.62,.13,0,0,.05,{mono:true,color:'#f4f0dc',res:384,weight:800});
  const folder=box(root,.94,.10,.48,-1.48,1.16,-.12,M.orange,.02);interactive(folder,'recorderFolder');const folderLabel=label(folder,'FOLDER',.82,.24,0,.06,0,{mono:true,res:256});folderLabel.rotation.x=-Math.PI/2;

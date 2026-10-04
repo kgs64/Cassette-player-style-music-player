@@ -4,7 +4,7 @@ parser=argparse.ArgumentParser()
 parser.add_argument('--web-only',action='store_true',help='Update web deployment only; leave iOS files and ZIP unchanged.')
 args=parser.parse_args()
 root=Path(__file__).resolve().parent.parent/'outputs'
-names=['index.html','cassette-world.html','sw.js','manifest.webmanifest','使用说明.md','iPhone使用说明.md','开发交接说明.md','THIRD_PARTY_NOTICES.md']
+names=['index.html','cassette-world.html','sw.js','manifest.webmanifest','使用说明.md','iPhone使用说明.md','开发交接说明.md','在线点歌方案.md','THIRD_PARTY_NOTICES.md']
 if args.web_only: names.remove('iPhone使用说明.md')
 files=[root/n for n in names]
 for folder in ['icons','third-party']:

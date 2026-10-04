@@ -16,7 +16,7 @@ export function matchLyricRecord(meta,record){
  if(typeof source!=='string'||source.length>MAX_LYRIC_BYTES)return null;const lyrics=parseLyrics(source);if(!lyrics.cues.length)return null;
  return {status:'found',lyrics,provider:'LRCLIB',recordId:record.id};
 }
-export function createLyricLookup({fetcher=(...args)=>fetch(...args),timeoutMs=8000,intervalMs=300,client='Cassette World/5.14 (local web client)'}={}){
+export function createLyricLookup({fetcher=(...args)=>fetch(...args),timeoutMs=8000,intervalMs=300,client='Cassette World/5.15 (local web client)'}={}){
  let queue=Promise.resolve(),nextAt=0,retryAt=0;const cache=new Map();
  const state={pending:0,last:'idle',provider:'LRCLIB'};
  async function run(signature){

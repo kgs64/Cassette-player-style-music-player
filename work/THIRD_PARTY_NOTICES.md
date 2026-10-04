@@ -332,3 +332,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+
+## Online music service adapters
+
+The online terminal and REST adapters are original project code. No Audius SDK, MetingJS, APlayer or Meting server code is bundled. Research and API references: https://github.com/AudiusProject/apps ; https://docs.audius.co/api/ ; https://github.com/metowolf/MetingJS ; https://github.com/metowolf/Meting-API ; https://github.com/metowolf/Meting ; https://lrclib.net/docs . Online streaming, lyrics and explicitly permitted downloads require external service access; locally imported audio and decryption keys remain on the device.
