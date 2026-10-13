@@ -1,4 +1,5 @@
-![Uploading 示例.png…]()
+![描述文字]([https://github.com/username/reponame/blob/main/images/logo.png](https://github.com/kgs64/Cassette-player-style-music-player/blob/main/%E6%88%AA%E5%B1%8F2026-10-13%2017.06.10.png)?raw=true)
+
 
 
 # Cassette World
