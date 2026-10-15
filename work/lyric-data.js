@@ -14,7 +14,8 @@ export function parseLyrics(source){
  const cues=timed.length?timed.sort((a,b)=>a.time-b.time).slice(0,3000):plain.slice(0,1000).map(text=>({time:null,text}));
  // Multiple translations at the same timestamp share a physical page.
  const merged=[];for(const cue of cues){const last=merged.at(-1);if(timed.length&&last?.time===cue.time){if(cue.text)last.text=(last.text+'\n'+cue.text).trim().slice(0,600);}else merged.push({...cue});}
- return {timed:timed.length>0,cues:merged};
+ const metadata={title:source.match(/\[ti:([^\]\r\n]*)\]/i)?.[1]?.trim()||'',artist:source.match(/\[ar:([^\]\r\n]*)\]/i)?.[1]?.trim()||'',album:source.match(/\[al:([^\]\r\n]*)\]/i)?.[1]?.trim()||''};
+ return {timed:timed.length>0,cues:merged,...(merged.length&&Object.values(metadata).some(Boolean)?{metadata}:{})};
 }
 export function lyricIndex(data,time){
  if(!data?.cues?.length)return -1;if(!data.timed)return 0;
