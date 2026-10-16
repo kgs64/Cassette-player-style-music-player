@@ -1,0 +1,21 @@
+const {chromium}=require('/Users/a1/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const assert=require('node:assert/strict');
+(async()=>{const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});try{
+ const page=await browser.newPage({viewport:{width:1500,height:1000}}),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
+ await page.goto('http://127.0.0.1:8878/outputs/index.html');await page.waitForFunction(()=>window.cassetteWorld?.state.archive.ready);await page.waitForTimeout(4500);
+ const state=()=>page.evaluate(()=>cassetteWorld.state);
+ const settings=async()=>{const p=await page.evaluate(()=>cassetteWorld.objectPositions.settings);await page.mouse.click(...p);await page.locator('#machine-settings').waitFor({state:'visible'});};
+ await settings();const water=page.locator('[data-water-enabled]'),snow=page.locator('[data-snow-enabled]');
+ assert(!(await state()).environment.snow.enabled);await snow.check();await page.waitForTimeout(800);let s=await state();assert(s.environment.snow.enabled);assert(!s.environment.water.enabled);assert(s.environment.snow.falling);assert.equal(s.environment.snow.flakes,1100);assert(s.environment.snow.relief.nearPeak>.25&&s.environment.snow.relief.nearPeak<.6);assert(s.environment.snow.relief.farPeak>s.environment.snow.relief.nearPeak*2);assert.equal(s.environment.snow.drawCalls,2);assert(s.environment.snow.groundY<s.environment.snow.plinthTop);assert.equal(s.people.length,14);
+ await snow.uncheck();await snow.check();await page.waitForTimeout(1800);const before=(await state()).performance;for(let i=0;i<4;i++){await snow.uncheck();await page.waitForTimeout(100);await snow.check();await page.waitForTimeout(200);}const after=(await state()).performance;assert.equal(after.geometries,before.geometries);assert.equal(after.textures,before.textures);
+ await water.check();assert(!(await state()).environment.snow.enabled);assert((await state()).environment.water.enabled);assert(!(await snow.isChecked()));await snow.check();assert(!(await water.isChecked()));
+ await page.getByRole('button',{name:'关闭设置'}).click();await page.waitForTimeout(1500);await page.screenshot({path:'/tmp/cassette-snow.png'});
+ const time=(await state()).environment.snow.time;await page.waitForTimeout(300);assert((await state()).environment.snow.time>time);
+ await page.emulateMedia({reducedMotion:'reduce'});await page.waitForTimeout(150);assert(!(await state()).environment.snow.falling);const t=(await state()).environment.snow.time;await page.waitForTimeout(250);assert.equal((await state()).environment.snow.time,t);await page.emulateMedia({reducedMotion:'no-preference'});await page.waitForTimeout(100);assert((await state()).environment.snow.falling);
+ await page.reload();await page.waitForFunction(()=>window.cassetteWorld?.state.archive.ready);assert((await state()).environment.snow.enabled);assert(!(await state()).environment.water.enabled);await page.waitForTimeout(1500);
+ await settings();await page.locator('[name=renderQuality]').selectOption('1');await page.waitForTimeout(500);await page.locator('[name=renderQuality]').selectOption('0');await snow.uncheck();assert(!(await state()).environment.snow.enabled);const stopped=(await state()).environment.snow.time;await page.waitForTimeout(200);assert.equal((await state()).environment.snow.time,stopped);
+ await page.getByRole('button',{name:'关闭设置'}).click();await page.screenshot({path:'/tmp/cassette-snow-disabled.png'});
+ const p=await page.evaluate(()=>cassetteWorld.objectPositions.magnifier);await page.mouse.click(...p);await page.locator('#tape-inspector').waitFor({state:'visible'});assert(await page.getByRole('searchbox').isVisible());await page.getByRole('button',{name:'关闭放大镜'}).click();
+ assert.deepEqual(errors,[]);console.log(JSON.stringify({snow:s.environment.snow,waterMutualExclusion:true,persistence:true,reducedMotion:true,photographicMode:true,search:true,resources:{before,after},errors},null,2));
+ }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
