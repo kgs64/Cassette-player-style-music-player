@@ -1,16 +1,28 @@
 // Local, bounded lyric data. Never guess timing for unsynchronised text.
 export const MAX_LYRIC_BYTES=512*1024;
+// NetEase exports may contain credit records instead of lyric lines.
+export function isLyricCredit(row){
+ try{const value=JSON.parse(row);return value&&typeof value==='object'&&Number.isFinite(value.t)&&value.t<0&&Array.isArray(value.c)&&value.c.length>0&&value.c.every(part=>part&&typeof part.tx==='string');}catch{return false;}
+}
+function instrumentalLyrics(){return {timed:false,instrumental:true,cues:[{time:null,text:'纯音乐，请欣赏'}]};}
+export function normalizeCreditLyrics(data){
+ if(data?.cues?.length&&data.cues.every(cue=>isLyricCredit(cue.text)))Object.assign(data,instrumentalLyrics());
+ return data;
+}
 export function parseLyrics(source){
  if(typeof source!=='string')return {timed:false,cues:[]};
  source=source.slice(0,MAX_LYRIC_BYTES).replace(/^\uFEFF/,'');
  const offset=Number(source.match(/\[offset:([+-]?\d+)\]/i)?.[1]||0)/1000;
+ let credits=0;
  const timed=[],plain=[];
  for(const row of source.split(/\r?\n/).slice(0,4000)){
+  if(isLyricCredit(row.trim())){credits++;continue;}
   const tags=[...row.matchAll(/\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g)];
   const text=row.replace(/\[[^\]]*\]/g,'').trim().slice(0,400);
   if(tags.length){for(const tag of tags){const seconds=Number(tag[2]);if(seconds<60)timed.push({time:Math.max(0,Number(tag[1])*60+seconds+Number('0.'+(tag[3]||'0'))+offset),text});}}
   else if(text)plain.push(text);
  }
+ if(credits&&!timed.length&&!plain.length)return instrumentalLyrics();
  const cues=timed.length?timed.sort((a,b)=>a.time-b.time).slice(0,3000):plain.slice(0,1000).map(text=>({time:null,text}));
  // Multiple translations at the same timestamp share a physical page.
  const merged=[];for(const cue of cues){const last=merged.at(-1);if(timed.length&&last?.time===cue.time){if(cue.text)last.text=(last.text+'\n'+cue.text).trim().slice(0,600);}else merged.push({...cue});}
@@ -18,6 +30,7 @@ export function parseLyrics(source){
  return {timed:timed.length>0,cues:merged,...(merged.length&&Object.values(metadata).some(Boolean)?{metadata}:{})};
 }
 export function lyricIndex(data,time){
+ normalizeCreditLyrics(data);
  if(!data?.cues?.length)return -1;if(!data.timed)return 0;
  let lo=0,hi=data.cues.length-1,found=-1;while(lo<=hi){const mid=(lo+hi)>>1;if(data.cues[mid].time<=time){found=mid;lo=mid+1;}else hi=mid-1;}return found;
 }

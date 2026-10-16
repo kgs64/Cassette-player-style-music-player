@@ -1,3 +1,4 @@
+import {enhanceSettingsLayout} from './settings-layout.js';
 import {createAmbientRain} from './ambient-rain.js';
 import {sunsetPalette} from './sunset-sky.js';
 import {createAmbientTime} from './ambient-time.js';
@@ -203,5 +204,6 @@ export function createAmbientWater({scene,ground,base,camera,renderer,types:T}){
  if(enabled)makeSurface();
  timeSystem=createAmbientTime({scene,ground,renderer,types:T,host:section,snow,waterUniforms:uniforms});
  rain=createAmbientRain({scene,ground,base,types:T,host:section,water:()=>enabled,snow});
+ enhanceSettingsLayout(host);
  return {tick,setEnabled,snow,timeSystem,rain,get state(){return {enabled,rain:rain.state,layout,volume:outputVolume,amplitude:MAX_HEIGHT*outputVolume,compiled,time:elapsed,energy:level,pulses:pulseCount,activeRipples:Array.from({length:MAX_RIPPLES},(_,i)=>ripples[i*4+3]>0&&elapsed-ripples[i*4+2]<6.8).filter(Boolean).length,surfaceY:WATER_Y,maxCrest:WATER_Y+MAX_HEIGHT,plinthTop:base.position.y+.25,poolFloor:FLOOR_Y,depth:WATER_Y-FLOOR_Y,footprint:[600,600],vertices:mesh?.geometry.attributes.position.count||0,reflectionPasses:enabled?2:0,reflectionFrames,renderTargetSize:reflection?[reflection.width,reflection.height]:null};},dispose(){rain.dispose();timeSystem.dispose();snow.dispose();release();section.remove();disposed=true;}};
 }

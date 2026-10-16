@@ -50,7 +50,7 @@ window.__wallpaperInactive=window.__wallpaperInactive??false;
 window.__wallpaperSleeping=window.__wallpaperSleeping??false;
 const mobile = matchMedia('(pointer: coarse)').matches;
 const device={isMobile:mobile,isTouch:navigator.maxTouchPoints>0,isIOS:/iPad|iPhone|iPod/.test(navigator.userAgent)||(/Mac/.test(navigator.platform)&&navigator.maxTouchPoints>1)};
-let bootReady=false,qualityRatio=Math.min(devicePixelRatio,mobile?1.25:1.5);
+let bootReady=false,qualityRatio=mobile?Math.min(devicePixelRatio,1.25):Math.min(2,Math.max(1.25,devicePixelRatio));
 const canvas = document.querySelector('#world');
 const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:false,powerPreference:'low-power'});
 renderer.setPixelRatio(wallpaperMode?1:qualityRatio);
@@ -70,7 +70,7 @@ const studioRendering=createStudioRendering({renderer,scene,key,rim,hemisphere,m
 let composer=null,bokeh=null,renderQuality=0;
 function destroyComposer(){if(!composer)return;for(const pass of composer.passes)pass.dispose?.();composer.dispose();composer=null;bokeh=null;}
 function setRenderQuality(value){const next=value===1&&!mobile&&!wallpaperMode?1:0;if(next!==renderQuality){destroyComposer();renderQuality=next;}renderer.shadowMap.needsUpdate=true;}
-function createFocusComposer(){composer=new EffectComposer(renderer);for(const target of [composer.renderTarget1,composer.renderTarget2])target.samples=Math.min(4,renderer.capabilities.maxSamples);composer.addPass(new RenderPass(scene,camera));if(renderQuality)composer.addPass(createStudioOcclusion(scene,camera,innerWidth,innerHeight));bokeh=new BokehPass(scene,camera,{focus:25,aperture:.000018,maxblur:.003});bokeh.enabled=false;composer.addPass(bokeh);composer.addPass(new OutputPass());}
+function createFocusComposer(){composer=new EffectComposer(renderer);for(const target of [composer.renderTarget1,composer.renderTarget2])target.samples=Math.min(8,renderer.capabilities.maxSamples);composer.addPass(new RenderPass(scene,camera));if(renderQuality)composer.addPass(createStudioOcclusion(scene,camera,innerWidth,innerHeight));bokeh=new BokehPass(scene,camera,{focus:25,aperture:.000018,maxblur:.003});bokeh.enabled=false;composer.addPass(bokeh);composer.addPass(new OutputPass());}
 const mat=(c,r=.6,m=0,more={})=>new THREE.MeshStandardMaterial({color:c,roughness:r,metalness:m,...more});
 const M={silver:mat('#b6bcb8',.42,.35),edge:mat('#d1d4cf',.38,.44),cream:mat('#e4e0d2',.64),dark:mat('#303735',.68),black:mat('#131b1c',.74),rubber:mat('#232929',.92),metal:mat('#8c9590',.32,.78),chrome:mat('#cad0c8',.22,.86),orange:mat('#bc582c',.55),red:mat('#853d30'),pcb:mat('#3e6555',.7),copper:mat('#bd9a60',.4,.67),paper:mat('#e6dfc9',.87),glass:mat('#929f98',.15,.08,{transparent:true,opacity:.15,depthWrite:false}),smoke:mat('#495d55',.24,.15,{transparent:true,opacity:.2,depthWrite:false}),tape:mat('#372b22',.62,.08),green:mat('#9eae75',.6,0,{emissive:'#4c582a',emissiveIntensity:.18})};
 studioRendering.finishMaterials(M);
