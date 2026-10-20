@@ -1,0 +1,10 @@
+require('./import-preflight.js');const assert=require('node:assert/strict'),filter=globalThis.cassetteImportPreflight.filter;
+const file={name:'歌曲.ncm',size:123,lastModified:99},track={fileName:file.name,fileSize:123,lastModified:99,audioBlob:new Blob(['mp3']),recorded:true};
+assert.equal(filter([file],[track]).skipped.length,1);
+assert.equal(filter([file],[{...track,sourceRequired:true}]).pending.length,1);
+assert.equal(filter([{...file,size:124}],[track]).pending.length,1);
+assert.equal(filter([{...file,lastModified:100}],[track]).pending.length,1);
+assert.equal(filter([file],[{audioBlob:track.audioBlob,fingerprint:'歌曲.ncm|123|99|32200'}]).skipped.length,1);
+const unreadable={...file,arrayBuffer(){throw Error('must not read');}};assert.equal(filter([unreadable],[track]).skipped.length,1);
+assert.equal(filter([file,{name:'new.wav',size:32,lastModified:2}],[track]).pending.length,1);
+console.log('PASS metadata-only skipping, mixed batches, legacy archive, changed files and missing sources');

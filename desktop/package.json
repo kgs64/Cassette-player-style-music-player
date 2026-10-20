@@ -1,0 +1,9 @@
+{
+  "name": "cassette-world-desktop",
+  "productName": "Cassette World",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "Cassette World standalone macOS player",
+  "license": "UNLICENSED"
+}
